@@ -1,19 +1,14 @@
-name: Hello World Workflow
+name: Test Self-Hosted Runner
 
-on: [push] # Trigger the workflow on push event
+on:
+  workflow_dispatch:
 
 jobs:
-  hello_world_job:
-    runs-on: [self-hosted, kubernetes, harphies, ARM64]
+  test:
+    runs-on: [self-hosted, kubernetes, harphies]
     steps:
-      - name: Print Hello World
-        run: echo "Hello World" # Execute the command to print Hello World
-      - name: Show Environment Info
+      - name: Test Runner
         run: |
-          echo "Runner information:"
-          echo "-------------------"
-          echo "Hostname: $(hostname)"
-          echo "Operating System: $(uname -a)"
-          echo "Docker version: $(docker --version || echo 'Docker not available')"
-          echo "Current directory: $(pwd)"
-          echo "Directory contents: $(ls -la)"
+          echo "Hello from self-hosted runner"
+          hostname
+          env
