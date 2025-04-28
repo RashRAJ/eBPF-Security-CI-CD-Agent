@@ -10,8 +10,14 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Check Kernel Version
-        run: uname -r
+      - name: Check Environment
+        run: |
+          echo "Checking kernel version:"
+          uname -r
+          echo "Checking system architecture:"
+          uname -m
+          echo "Checking Docker availability:"
+          docker --version || echo "Docker not available"
 
       - name: Download kntrl (arm64)
         run: |
@@ -19,12 +25,26 @@ jobs:
           chmod +x kntrl
           sudo mv kntrl /usr/local/bin/kntrl
 
-      - name: Start kntrl agent (Monitor Mode)
+      - name: Increase MEMLOCK limit
         run: |
-          echo "Starting kntrl agent in monitor mode..."
-          sudo /usr/local/bin/kntrl run --mode=monitor --allowed-hosts=kondukto.io,${{ env.GITHUB_ACTIONS_URL }} --allow-local-ranges=true &
+          # Increase the memlock limit for the current session
+          sudo sh -c "ulimit -l unlimited"
+          # Check current limits
+          ulimit -a
+
+      - name: Start kntrl agent (Docker approach)
+        run: |
+          echo "Starting kntrl agent in monitor mode using Docker..."
+          sudo docker run --privileged \
+            --pid=host \
+            --network=host \
+            --cgroupns=host \
+            --volume=/sys/kernel/debug:/sys/kernel/debug:ro \
+            --volume /tmp:/tmp \
+            --rm docker.io/kondukto/kntrl:0.1.3 \
+            run --mode=monitor --allowed-hosts=kondukto.io,${{ env.GITHUB_ACTIONS_URL }} --allow-local-ranges=true &
           sleep 5
-          echo "kntrl agent started in background."
+          echo "kntrl agent started in background via Docker."
 
       - name: Secured Build
         run: |
@@ -38,10 +58,31 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Start kntrl agent (Prevent Mode)
+      - name: Check Environment
         run: |
-          echo "Starting kntrl agent in prevent mode..."
-          sudo /usr/local/bin/kntrl run --mode=trace --allowed-hosts=kondukto.io,${{ env.GITHUB_ACTIONS_URL }} --allow-local-ranges=true &
+          echo "Checking kernel version:"
+          uname -r
+          echo "Checking system architecture:"
+          uname -m
+
+      - name: Increase MEMLOCK limit
+        run: |
+          # Increase the memlock limit for the current session
+          sudo sh -c "ulimit -l unlimited"
+          # Check current limits
+          ulimit -a
+
+      - name: Start kntrl agent (Docker approach - Prevent Mode)
+        run: |
+          echo "Starting kntrl agent in prevent mode using Docker..."
+          sudo docker run --privileged \
+            --pid=host \
+            --network=host \
+            --cgroupns=host \
+            --volume=/sys/kernel/debug:/sys/kernel/debug:ro \
+            --volume /tmp:/tmp \
+            --rm docker.io/kondukto/kntrl:0.1.3 \
+            run --mode=trace --allowed-hosts=kondukto.io,${{ env.GITHUB_ACTIONS_URL }} --allow-local-ranges=true &
           sleep 5
           echo "kntrl agent started in background with prevention enabled."
 
