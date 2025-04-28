@@ -15,7 +15,7 @@ jobs:
           echo "Secure financial reporting service build on this runner"
           hostname
           env
-          ls -la  # This will list the files in your repository
+          ls -la
   
   malicoius-build:
     runs-on: ebpf-runners-cicd
@@ -24,7 +24,7 @@ jobs:
       
       - name: Malicious Build
         run: |
-          echo "Secure financial reporting service build on this runner"
+          echo "Simulate malicious build trying to gain access to financial reporting service build on this runner and see how eBPF helps prevent and block that"
           hostname
           env
-          ls -la  # This will list the files in your repository
+          ls -la
