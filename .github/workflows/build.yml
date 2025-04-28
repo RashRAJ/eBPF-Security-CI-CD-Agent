@@ -16,6 +16,16 @@ jobs:
           hostname
           env
           ls -la
+
+      - name: kntrl agent
+        run: sudo docker run --privileged \
+          --pid=host \
+          --network=host \
+          --cgroupns=host \
+          --volume=/sys/kernel/debug:/sys/kernel/debug:ro \
+          --volume /tmp:/tmp \
+          --rm docker.io/kondukto/kntrl:0.1.2 \
+          --mode=monitor 
   
   malicoius-build:
     runs-on: ebpf-runners-cicd
