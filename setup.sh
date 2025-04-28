@@ -242,8 +242,8 @@ deploy_runners() {
     fi
     
     # Install the controller using the official OCI chart with version
-    echo "Installing gha-runner-scale-set-controller version ${CHART_VERSION}..."
-    helm install arc \
+    echo "Installing/upgrading gha-runner-scale-set-controller version ${CHART_VERSION}..."
+    helm upgrade --install arc \
       --namespace $CONTROLLER_NAMESPACE \
       -f "$TEMP_CONTROLLER_VALUES" \
       oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller --version=${CHART_VERSION}
@@ -263,8 +263,8 @@ deploy_runners() {
     fi
     
     # Install the runner scale set with version
-    echo "Installing runner scale set version ${CHART_VERSION}..."
-    helm install ${RUNNER_NAME} \
+    echo "Installing/upgrading runner scale set version ${CHART_VERSION}..."
+    helm upgrade --install ${RUNNER_NAME} \
       --namespace ${RUNNER_NAMESPACE} \
       -f "$TEMP_RUNNER_VALUES" \
       oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set --version=${CHART_VERSION}
@@ -300,7 +300,6 @@ case $COMMAND in
         check_prerequisites
         check_required_files
         create_cluster
-        cleanup_old_crds
         deploy_runners
         ;;
     destroy)
@@ -309,7 +308,6 @@ case $COMMAND in
     deploy)
         check_prerequisites
         check_required_files
-        cleanup_old_crds
         deploy_runners
         ;;
     clean)
