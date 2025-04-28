@@ -4,7 +4,7 @@ on: [push] # Trigger the workflow on push event
 
 jobs:
   hello_world_job:
-    runs-on: ubuntu-latest # Use the latest Ubuntu runner
+    runs-on: ebpf-runners-dqc99-pt4p5 # Use the latest Ubuntu runner
     steps:
       - name: Print Hello World
         run: echo "Hello World" # Execute the command to print Hello World
