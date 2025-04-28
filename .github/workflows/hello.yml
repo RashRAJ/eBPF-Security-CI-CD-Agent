@@ -9,8 +9,7 @@ jobs:
   test:
     runs-on: [self-hosted, kubernetes, harphies]
     container:
-      image: ubuntu:latest  # Or any image suitable for your needs
-    
+      image: ubuntu:latest
     steps:
       - uses: actions/checkout@v3
       - name: Run test
