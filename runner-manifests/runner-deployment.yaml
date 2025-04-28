@@ -47,9 +47,9 @@ spec:
             runAsGroup: 121
             # Allow docker access but don't use privileged mode
             privileged: false
-      volumeMounts:
-        - name: docker-socket
-          mountPath: /var/run/docker.sock
+          volumeMounts:
+            - name: docker-socket
+              mountPath: /var/run/docker.sock
       volumes:
         - name: docker-socket
           hostPath:
