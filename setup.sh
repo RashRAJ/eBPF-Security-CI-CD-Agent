@@ -14,9 +14,13 @@ RUNNER_NAMESPACE="actions-runner-system"
 # Set these variables for your specific use case
 GITHUB_OWNER=""
 GITHUB_REPO=""
-RUNNER_REPLICAS=2
-# Custom runner name (will default to a sanitized version if not provided)
 RUNNER_NAME=""
+# Directory for runner YAML files
+MANIFESTS_DIR="./runner-manifests"
+# Kind cluster configuration in root directory
+KIND_CONFIG="./kind-cluster.yaml"
+# Token secret file path
+TOKEN_SECRET_FILE="$MANIFESTS_DIR/github-token-secret.yaml"
 
 # Function to display usage information
 usage() {
@@ -33,12 +37,11 @@ usage() {
     echo "  --token=<token>       GitHub Personal Access Token (required for create/deploy)"
     echo "  --owner=<org/user>    GitHub organization or username"
     echo "  --repo=<repo>         GitHub repository name (if empty, runners will be org-level)"
-    echo "  --replicas=<num>      Number of runner replicas (default: 2)"
-    echo "  --name=<name>         Custom runner name (must be RFC 1123 compliant)"
+    echo "  --name=<name>         Name for runner (required for variable substitution in manifests)"
     echo ""
     echo "Examples:"
-    echo "  $0 create --token=ghp_xxxx --owner=myorg --repo=myrepo"
-    echo "  $0 create --token=ghp_xxxx --owner=myorg --name=custom-runner"
+    echo "  $0 create --token=ghp_xxxx --owner=myorg --repo=myrepo --name=myrunner"
+    echo "  $0 create --token=ghp_xxxx --owner=myorg --name=myrunner"
     echo "  $0 destroy"
     exit 1
 }
@@ -55,9 +58,6 @@ parse_args() {
                 ;;
             --repo=*)
                 GITHUB_REPO="${arg#*=}"
-                ;;
-            --replicas=*)
-                RUNNER_REPLICAS="${arg#*=}"
                 ;;
             --name=*)
                 RUNNER_NAME="${arg#*=}"
@@ -97,30 +97,27 @@ check_prerequisites() {
     echo -e "${GREEN}All prerequisites are installed.${NC}"
 }
 
-# Function to create kind cluster config file
-create_kind_config() {
-    echo -e "${YELLOW}Creating Kind cluster configuration...${NC}"
-    cat > kind-cluster.yaml << EOF
-kind: Cluster
-apiVersion: kind.x-k8s.io/v1alpha4
-name: ${CLUSTER_NAME}
-nodes:
-  - role: control-plane
-    kubeadmConfigPatches:
-      - |
-        kind: InitConfiguration
-        nodeRegistration:
-          kubeletExtraArgs:
-            node-labels: "ingress-ready=true"
-    extraPortMappings:
-      - containerPort: 80
-        hostPort: 80
-        protocol: TCP
-      - containerPort: 443
-        hostPort: 443
-        protocol: TCP
-EOF
-    echo -e "${GREEN}Kind cluster configuration created.${NC}"
+# Function to check if required files exist
+check_required_files() {
+    # Check kind cluster config
+    if [ ! -f "$KIND_CONFIG" ]; then
+        echo -e "${RED}Error: Kind cluster configuration not found at $KIND_CONFIG${NC}"
+        exit 1
+    fi
+    
+    # Check runner manifests directory
+    if [ ! -d "$MANIFESTS_DIR" ]; then
+        echo -e "${RED}Error: Runner manifests directory $MANIFESTS_DIR does not exist.${NC}"
+        echo "Please create it and add your Kubernetes manifests before running this script."
+        exit 1
+    fi
+    
+    # Check if there are any yaml files in the manifests directory
+    if [ ! "$(ls -A $MANIFESTS_DIR/*.yaml 2>/dev/null)" ]; then
+        echo -e "${RED}Error: No YAML files found in $MANIFESTS_DIR${NC}"
+        echo "Please add your runner manifests before continuing."
+        exit 1
+    fi
 }
 
 # Function to create the Kind cluster
@@ -133,13 +130,36 @@ create_cluster() {
         echo -e "${YELLOW}Using existing cluster.${NC}"
     else
         echo -e "${YELLOW}Creating Kind cluster '${CLUSTER_NAME}'...${NC}"
-        kind create cluster --config kind-cluster.yaml
+        kind create cluster --config "$KIND_CONFIG"
         echo -e "${GREEN}Kind cluster '${CLUSTER_NAME}' created successfully.${NC}"
     fi
     
     # Display cluster info
     echo -e "${YELLOW}Cluster information:${NC}"
     kubectl cluster-info
+}
+
+# Function to update variables in YAML file
+apply_with_vars() {
+    local file=$1
+    echo "Applying $file with variable substitution..."
+    
+    # Create a temporary file
+    TEMP_FILE=$(mktemp)
+    
+    # Replace variables with their values
+    cat "$file" | \
+        sed "s|\${GITHUB_TOKEN}|${GITHUB_TOKEN}|g" | \
+        sed "s|\${RUNNER_NAME}|${RUNNER_NAME}|g" | \
+        sed "s|\${GITHUB_OWNER}|${GITHUB_OWNER}|g" | \
+        sed "s|\${GITHUB_REPO}|${GITHUB_REPO}|g" | \
+        sed "s|\${RUNNER_NAMESPACE}|${RUNNER_NAMESPACE}|g" > "$TEMP_FILE"
+    
+    # Apply the updated file
+    kubectl apply -f "$TEMP_FILE"
+    
+    # Remove temporary file
+    rm "$TEMP_FILE"
 }
 
 # Function to deploy GitHub runners
@@ -154,7 +174,15 @@ deploy_runners() {
         exit 1
     fi
     
+    if [ -z "$RUNNER_NAME" ]; then
+        echo -e "${RED}Error: Runner name is required. Use --name=<runner-name>${NC}"
+        exit 1
+    fi
+    
     echo -e "${YELLOW}Deploying GitHub Actions Runner Controller...${NC}"
+    
+    # Check if required files exist
+    check_required_files
     
     # Install cert-manager (required for actions-runner-controller)
     echo "Installing cert-manager..."
@@ -171,15 +199,24 @@ deploy_runners() {
     helm repo add actions-runner-controller https://actions-runner-controller.github.io/actions-runner-controller
     helm repo update
     
-    # Create namespace if it doesn't exist
-    kubectl create namespace ${RUNNER_NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
+    # Apply namespace first if it exists
+    if [ -f "$MANIFESTS_DIR/namespace.yaml" ]; then
+        echo "Applying namespace..."
+        apply_with_vars "$MANIFESTS_DIR/namespace.yaml"
+    fi
     
-    # Create secret for GitHub token
-    echo "Creating GitHub token secret..."
-    kubectl create secret generic controller-manager \
-        -n ${RUNNER_NAMESPACE} \
-        --from-literal=github_token=${GITHUB_TOKEN} \
-        --dry-run=client -o yaml | kubectl apply -f -
+    # Handle GitHub token secret
+    if [ -f "$TOKEN_SECRET_FILE" ]; then
+        echo "Applying GitHub token secret with substitution..."
+        apply_with_vars "$TOKEN_SECRET_FILE"
+    else
+        echo "Creating GitHub token secret dynamically..."
+        kubectl create namespace ${RUNNER_NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
+        kubectl create secret generic controller-manager \
+            -n ${RUNNER_NAMESPACE} \
+            --from-literal=github_token=${GITHUB_TOKEN} \
+            --dry-run=client -o yaml | kubectl apply -f -
+    fi
     
     # Install the controller
     echo "Installing actions-runner-controller..."
@@ -200,160 +237,13 @@ deploy_runners() {
     echo "Waiting for controller to be ready..."
     kubectl wait --for=condition=available --timeout=300s deployment/actions-runner-controller -n ${RUNNER_NAMESPACE}
     
-    # Create runner deployment YAML
-    echo "Creating runner deployment..."
-    
-    # Create a valid Kubernetes name if not provided
-    if [ -z "$RUNNER_NAME" ]; then
-        if [ -z "$GITHUB_REPO" ]; then
-            # For org runners, use org name sanitized
-            RUNNER_NAME=$(echo "${GITHUB_OWNER}" | tr '[:upper:]' '[:lower:]' | sed -e 's/[^a-z0-9]/-/g' | sed -e 's/^[^a-z0-9]//g' | sed -e 's/[^a-z0-9]$//g')
-        else
-            # For repo runners, use shorter combination
-            # Sanitize repository name (convert to lowercase, replace invalid chars with hyphens)
-            SANITIZED_REPO=$(echo "${GITHUB_REPO}" | tr '[:upper:]' '[:lower:]' | sed -e 's/[^a-z0-9]/-/g' | sed -e 's/^[^a-z0-9]//g' | sed -e 's/[^a-z0-9]$//g')
-            RUNNER_NAME="${GITHUB_OWNER}-${SANITIZED_REPO}"
-            
-            # Ensure it's not too long (63 chars max for K8s)
-            if [ ${#RUNNER_NAME} -gt 50 ]; then
-                # If too long, use a hash of the repo name
-                HASH=$(echo "${GITHUB_REPO}" | md5sum | cut -c1-8)
-                RUNNER_NAME="${GITHUB_OWNER}-${HASH}"
-            fi
+    # Apply all runner manifests (skipping namespace and token secret which were already applied)
+    echo "Applying runner manifests..."
+    for manifest in "$MANIFESTS_DIR"/*.yaml; do
+        if [[ "$(basename "$manifest")" != "namespace.yaml" && "$(basename "$manifest")" != "github-token-secret.yaml" ]]; then
+            apply_with_vars "$manifest"
         fi
-    fi
-    
-    # Ensure runner name is valid (lowercase, starts and ends with alphanumeric)
-    RUNNER_NAME=$(echo "${RUNNER_NAME}" | tr '[:upper:]' '[:lower:]' | sed -e 's/[^a-z0-9]/-/g' | sed -e 's/^[^a-z0-9]/r-/g' | sed -e 's/[^a-z0-9]$/r/g')
-    
-    echo "Using runner name: ${RUNNER_NAME}"
-    
-    if [ -z "$GITHUB_REPO" ]; then
-        # Organization level runners
-        cat > runner-deployment.yaml << EOF
-apiVersion: actions.summerwind.dev/v1alpha1
-kind: RunnerDeployment
-metadata:
-  name: ${RUNNER_NAME}
-  namespace: ${RUNNER_NAMESPACE}
-spec:
-  replicas: ${RUNNER_REPLICAS}
-  template:
-    spec:
-      organization: ${GITHUB_OWNER}
-      labels:
-        - self-hosted
-        - kubernetes
-      env:
-        - name: GITHUB_URL
-          value: https://github.com
-        - name: ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER
-          value: "false"
-        - name: DISABLE_RUNNER_UPDATE
-          value: "true"
-        - name: RUNNER_FEATURE_FLAG_ONCE
-          value: "true"
-        - name: NODE_TLS_REJECT_UNAUTHORIZED
-          value: "0"
-        - name: NODE_OPTIONS
-          value: --tls-min-v1.0
-        - name: DOCKER_HOST
-          value: "unix:///var/run/docker.sock"
-      containerMode: kubernetes
-      dockerEnabled: true
-      dockerdWithinRunnerContainer: true
-      ephemeral: false
-      workDir: /tmp/runner
-      volumeMounts:
-        - name: docker-socket
-          mountPath: /var/run/docker.sock
-      volumes:
-        - name: docker-socket
-          hostPath:
-            path: /var/run/docker.sock
----
-apiVersion: actions.summerwind.dev/v1alpha1
-kind: HorizontalRunnerAutoscaler
-metadata:
-  name: ${RUNNER_NAME}-autoscaler
-  namespace: ${RUNNER_NAMESPACE}
-spec:
-  scaleTargetRef:
-    name: ${RUNNER_NAME}
-  minReplicas: 1
-  maxReplicas: 5
-  metrics:
-  - type: TotalNumberOfQueuedAndInProgressWorkflowRuns
-    scaleUpThreshold: '1'
-    scaleDownThreshold: '0'
-    scaleUpFactor: '2'
-    scaleDownFactor: '0.5'
-EOF
-    else
-        # Repository level runners
-        cat > runner-deployment.yaml << EOF
-apiVersion: actions.summerwind.dev/v1alpha1
-kind: RunnerDeployment
-metadata:
-  name: ${RUNNER_NAME}
-  namespace: ${RUNNER_NAMESPACE}
-spec:
-  replicas: ${RUNNER_REPLICAS}
-  template:
-    spec:
-      repository: ${GITHUB_OWNER}/${GITHUB_REPO}
-      labels:
-        - self-hosted
-        - kubernetes
-      env:
-        - name: GITHUB_URL
-          value: https://github.com
-        - name: ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER
-          value: "false"
-        - name: DISABLE_RUNNER_UPDATE
-          value: "true"
-        - name: RUNNER_FEATURE_FLAG_ONCE
-          value: "true"
-        - name: NODE_TLS_REJECT_UNAUTHORIZED
-          value: "0"
-        - name: NODE_OPTIONS
-          value: --tls-min-v1.0
-        - name: DOCKER_HOST
-          value: "unix:///var/run/docker.sock"
-      containerMode: kubernetes
-      dockerEnabled: true
-      dockerdWithinRunnerContainer: true
-      ephemeral: false
-      workDir: /tmp/runner
-      volumeMounts:
-        - name: docker-socket
-          mountPath: /var/run/docker.sock
-      volumes:
-        - name: docker-socket
-          hostPath:
-            path: /var/run/docker.sock
----
-apiVersion: actions.summerwind.dev/v1alpha1
-kind: HorizontalRunnerAutoscaler
-metadata:
-  name: ${RUNNER_NAME}-autoscaler
-  namespace: ${RUNNER_NAMESPACE}
-spec:
-  scaleTargetRef:
-    name: ${RUNNER_NAME}
-  minReplicas: 1
-  maxReplicas: 5
-  metrics:
-  - type: TotalNumberOfQueuedAndInProgressWorkflowRuns
-    scaleUpThreshold: '1'
-    scaleDownThreshold: '0'
-    scaleUpFactor: '2'
-    scaleDownFactor: '0.5'
-EOF
-    fi
-    
-    # Apply runner deployment
-    kubectl apply -f runner-deployment.yaml
+    done
     
     echo -e "${GREEN}GitHub Runners deployment complete.${NC}"
     echo "You can check the status of your runners with:"
@@ -380,7 +270,7 @@ parse_args "$@"
 case $COMMAND in
     create)
         check_prerequisites
-        create_kind_config
+        check_required_files
         create_cluster
         deploy_runners
         ;;

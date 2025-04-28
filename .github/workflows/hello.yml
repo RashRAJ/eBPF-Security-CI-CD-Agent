@@ -4,7 +4,7 @@ on: [push] # Trigger the workflow on push event
 
 jobs:
   hello_world_job:
-    runs-on: [self-hosted, kubernetes] # Target runners with both these labels
+    runs-on: [harphies] # Target runners with both these labels
     steps:
       - name: Print Hello World
         run: echo "Hello World" # Execute the command to print Hello World
