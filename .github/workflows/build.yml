@@ -29,19 +29,31 @@ jobs:
       - name: Start kntrl agent (Docker approach)
         run: |
           echo "Starting kntrl agent in monitor mode using Docker..."
-          # List available docker images for kondukto/kntrl
-          echo "Available kondukto/kntrl images:"
-          sudo docker search kondukto/kntrl
+          # List available kntrl tags on DockerHub
+          echo "Checking available kntrl tags on DockerHub:"
+          curl -s "https://hub.docker.com/v2/repositories/kondukto/kntrl/tags" | grep -o '"name":"[^"]*' | grep -o '[^"]*$' | head -n 5
           
-          # Try to pull the 0.1.3 image
+          # Try to pull the 0.1.3 image from DockerHub
           echo "Attempting to pull kondukto/kntrl:0.1.3"
           if sudo docker pull kondukto/kntrl:0.1.3; then
             KNTRL_IMAGE="kondukto/kntrl:0.1.3"
             echo "Successfully pulled 0.1.3 image"
           else
-            echo "Failed to pull 0.1.3 image, falling back to 0.1.2"
-            sudo docker pull kondukto/kntrl:0.1.2
-            KNTRL_IMAGE="kondukto/kntrl:0.1.2"
+            echo "Failed to pull 0.1.3 image, trying with v0.1.3 tag format"
+            if sudo docker pull kondukto/kntrl:v0.1.3; then
+              KNTRL_IMAGE="kondukto/kntrl:v0.1.3"
+              echo "Successfully pulled v0.1.3 image"
+            else
+              echo "Failed to pull v0.1.3 image, falling back to 0.1.2"
+              if sudo docker pull kondukto/kntrl:0.1.2; then
+                KNTRL_IMAGE="kondukto/kntrl:0.1.2"
+                echo "Successfully pulled 0.1.2 image"
+              else
+                echo "Trying latest tag as last resort"
+                sudo docker pull kondukto/kntrl:latest
+                KNTRL_IMAGE="kondukto/kntrl:latest"
+              fi
+            fi
           fi
           
           # Run kntrl in monitor mode
@@ -57,7 +69,7 @@ jobs:
           
           # Wait to ensure kntrl has time to start
           sleep 5
-          echo "kntrl agent started in background via Docker."
+          echo "kntrl agent started in background via Docker using $KNTRL_IMAGE."
 
       - name: Secured Build
         run: |
@@ -88,16 +100,19 @@ jobs:
       - name: Start kntrl agent (Docker approach - Prevent Mode)
         run: |
           echo "Starting kntrl agent in prevent mode using Docker..."
-          # Try to pull the 0.1.3 image
-          echo "Attempting to pull kondukto/kntrl:0.1.3"
+          # Try to pull the 0.1.3 image from DockerHub with various tag formats
           if sudo docker pull kondukto/kntrl:0.1.3; then
             KNTRL_IMAGE="kondukto/kntrl:0.1.3"
-            echo "Successfully pulled 0.1.3 image"
-          else
-            echo "Failed to pull 0.1.3 image, falling back to 0.1.2"
-            sudo docker pull kondukto/kntrl:0.1.2
+          elif sudo docker pull kondukto/kntrl:v0.1.3; then
+            KNTRL_IMAGE="kondukto/kntrl:v0.1.3"
+          elif sudo docker pull kondukto/kntrl:0.1.2; then
             KNTRL_IMAGE="kondukto/kntrl:0.1.2"
+          else
+            sudo docker pull kondukto/kntrl:latest
+            KNTRL_IMAGE="kondukto/kntrl:latest"
           fi
+          
+          echo "Using image: $KNTRL_IMAGE"
           
           # Run kntrl in prevent/trace mode
           sudo docker run --privileged \
