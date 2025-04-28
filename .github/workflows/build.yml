@@ -19,6 +19,13 @@ jobs:
           chmod +x kntrl
           sudo mv kntrl /usr/local/bin/kntrl
 
+      - name: Start kntrl agent (Monitor Mode)
+        run: |
+          echo "Starting kntrl agent in monitor mode..."
+          sudo /usr/local/bin/kntrl run --mode=monitor --allowed-hosts=kondukto.io,${{ env.GITHUB_ACTIONS_URL }} --allow-local-ranges=true &
+          sleep 5
+          echo "kntrl agent started in background."
+
       - name: Secured Build
         run: |
           echo "Secure financial reporting service build on this runner"
@@ -26,17 +33,17 @@ jobs:
           env
           ls -la
 
-      - name: kntrl agent (Monitor Mode - Binary - No Sudo Test)
-        run: |
-          echo "Starting kntrl agent in monitor mode (binary - no sudo)..."
-          /usr/local/bin/kntrl run --mode=monitor --allowed-hosts=kondukto.io,${{ env.GITHUB_ACTIONS_URL }}
-          echo "kntrl agent (no sudo) finished."
-        continue-on-error: true
-
   malicious-build:
     runs-on: ebpf-runners-cicd
     steps:
       - uses: actions/checkout@v3
+
+      - name: Start kntrl agent (Prevent Mode)
+        run: |
+          echo "Starting kntrl agent in prevent mode..."
+          sudo /usr/local/bin/kntrl run --mode=trace --allowed-hosts=kondukto.io,${{ env.GITHUB_ACTIONS_URL }} --allow-local-ranges=true &
+          sleep 5
+          echo "kntrl agent started in background with prevention enabled."
 
       - name: Simulate Malicious Actions
         run: |
@@ -49,14 +56,12 @@ jobs:
           curl -m 10 http://unauthorized-site.example.com # Attempt to connect to an external site
           echo "Attempted malicious actions."
 
-      - name: Verify eBPF Monitoring (Optional - Adapt based on kntrl capabilities)
+      - name: Check kntrl Logs
         if: always()
         run: |
-          echo "Checking for eBPF monitoring logs (adapt based on kntrl output)..."
-          # Adapt this based on how kntrl reports events (e.g., log file, CLI command)
-          # if [ -f /tmp/kntrl.out ]; then
-          #   cat /tmp/kntrl.out | grep "malicious"
-          # else
-          #   echo "kntrl log file not found."
-          # fi
-          echo "Verification of eBPF monitoring complete (check logs for details)."
+          echo "Checking kntrl logs..."
+          if [ -f /tmp/kntrl.out ]; then
+            cat /tmp/kntrl.out
+          else
+            echo "kntrl log file not found."
+          fi
