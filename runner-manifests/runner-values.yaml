@@ -23,13 +23,6 @@ template:
       - name: init-dind-externals
         image: ghcr.io/actions/actions-runner:latest-arm64  # ARM-specific image
         command: ["cp", "-r", "/home/runner/externals/.", "/home/runner/tmpDir/"]
-        resources:
-          limits:
-            cpu: "100m"
-            memory: "128Mi"
-          requests:
-            cpu: "50m"
-            memory: "64Mi"
         volumeMounts:
           - name: dind-externals
             mountPath: /home/runner/tmpDir
@@ -39,13 +32,6 @@ template:
       - name: runner
         image: ghcr.io/actions/actions-runner:latest-arm64  # ARM-specific image
         command: ["/home/runner/run.sh"]
-        resources:
-          limits:
-            cpu: "200m"
-            memory: "256Mi"
-          requests:
-            cpu: "100m"
-            memory: "128Mi"
         env:
           - name: DOCKER_HOST
             value: unix:///var/run/docker.sock
