@@ -1,24 +1,44 @@
-# Updated runner values with container images and reduced resources for M1 Mac
+# Updated runner values for M1 Mac with ARM compatibility
 githubConfigUrl: "https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}"
 githubConfigSecret:
   github_token: "${GITHUB_TOKEN}"
 
-# Runner labels
-labels:
-  - self-hosted
-  - kubernetes
-  - harphies
-
-# Docker-in-Docker configuration with images specified
+# Docker-in-Docker configuration with ARM images
 containerMode:
   type: dind
 
-# Add container images with reduced resource requirements
 template:
   spec:
+    # Mandatory ARM node selection for M1 Mac
+    nodeSelector:
+      kubernetes.io/arch: arm64
+    tolerations:
+      - key: "arch"
+        operator: "Equal"
+        value: "arm64"
+        effect: "NoSchedule"
+    
+    # Init container with ARM image and volume setup
+    initContainers:
+      - name: init-dind-externals
+        image: ghcr.io/actions/actions-runner:latest-arm64  # ARM-specific image
+        command: ["cp", "-r", "/home/runner/externals/.", "/home/runner/tmpDir/"]
+        resources:
+          limits:
+            cpu: "100m"
+            memory: "128Mi"
+          requests:
+            cpu: "50m"
+            memory: "64Mi"
+        volumeMounts:
+          - name: dind-externals
+            mountPath: /home/runner/tmpDir
+
+    # Main runner container with security improvements
     containers:
       - name: runner
-        image: ghcr.io/actions/actions-runner:latest
+        image: ghcr.io/actions/actions-runner:latest-arm64  # ARM-specific image
+        command: ["/home/runner/run.sh"]
         resources:
           limits:
             cpu: "200m"
@@ -27,25 +47,23 @@ template:
             cpu: "100m"
             memory: "128Mi"
         env:
-          - name: GITHUB_URL
-            value: https://github.com
+          - name: DOCKER_HOST
+            value: unix:///var/run/docker.sock
           - name: ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER
             value: "false"
           - name: DISABLE_RUNNER_UPDATE
-            value: "true"
-          - name: RUNNER_FEATURE_FLAG_ONCE
-            value: "true"
-          - name: NODE_TLS_REJECT_UNAUTHORIZED
-            value: "0"
-          - name: NODE_OPTIONS
-            value: --tls-min-v1.0
-    initContainers:
-      - name: init-dind-externals
-        image: ghcr.io/actions/actions-runner:latest
-        resources:
-          limits:
-            cpu: "100m"
-            memory: "128Mi"
-          requests:
-            cpu: "50m"
-            memory: "64Mi"
+            value: "false"  # Recommended for security updates
+        volumeMounts:
+          - name: work
+            mountPath: /home/runner/_work
+          - name: dind-sock
+            mountPath: /var/run
+
+    # Required volumes for dind mode
+    volumes:
+      - name: work
+        emptyDir: {}
+      - name: dind-sock
+        emptyDir: {}
+      - name: dind-externals
+        emptyDir: {}
