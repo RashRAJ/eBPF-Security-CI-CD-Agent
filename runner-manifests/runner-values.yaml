@@ -7,3 +7,13 @@ containerMode:
 
 maxRunners: 5
 minRunners: 1
+
+template:
+  spec:
+    containers:
+      - name: runner
+        image: ghcr.io/actions/actions-runner:latest
+        command: ["/home/runner/run.sh"]
+        resources:
+          limits:
+            memlock: -1 # Try -1 for unlimited

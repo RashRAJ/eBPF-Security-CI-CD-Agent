@@ -19,11 +19,6 @@ jobs:
           chmod +x kntrl
           sudo mv kntrl /usr/local/bin/kntrl
 
-      - name: Increase MEMLOCK Limit
-        run: |
-          ulimit -l unlimited
-          ulimit -l # Verify the limit for the current user
-
       - name: Secured Build
         run: |
           echo "Secure financial reporting service build on this runner"
