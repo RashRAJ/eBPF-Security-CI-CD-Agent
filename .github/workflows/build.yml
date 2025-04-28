@@ -15,7 +15,7 @@ jobs:
 
       - name: Download kntrl (arm64)
         run: |
-          curl -LO https://github.com/kondukto-io/kntrl/releases/download/v0.1.3/kntrl_arm64.arm64 -o kntrl
+          curl -L -o kntrl https://github.com/kondukto-io/kntrl/releases/download/v0.1.3/kntrl_arm64.arm64
           chmod +x kntrl
           sudo mv kntrl /usr/local/bin/kntrl # Make it accessible in PATH
 
