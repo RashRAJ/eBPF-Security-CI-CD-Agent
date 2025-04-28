@@ -1,55 +1,9 @@
-# Updated runner values for M1 Mac with ARM compatibility
 githubConfigUrl: "https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}"
 githubConfigSecret:
   github_token: "${GITHUB_TOKEN}"
 
-# Docker-in-Docker configuration with ARM images
 containerMode:
   type: dind
 
-template:
-  spec:
-    # Mandatory ARM node selection for M1 Mac
-    nodeSelector:
-      kubernetes.io/arch: arm64
-    tolerations:
-      - key: "arch"
-        operator: "Equal"
-        value: "arm64"
-        effect: "NoSchedule"
-    
-    # Init container with ARM image and volume setup
-    initContainers:
-      - name: init-dind-externals
-        image: ghcr.io/actions/actions-runner:latest-arm64  # ARM-specific image
-        command: ["cp", "-r", "/home/runner/externals/.", "/home/runner/tmpDir/"]
-        volumeMounts:
-          - name: dind-externals
-            mountPath: /home/runner/tmpDir
-
-    # Main runner container with security improvements
-    containers:
-      - name: runner
-        image: ghcr.io/actions/actions-runner:latest-arm64  # ARM-specific image
-        command: ["/home/runner/run.sh"]
-        env:
-          - name: DOCKER_HOST
-            value: unix:///var/run/docker.sock
-          - name: ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER
-            value: "false"
-          - name: DISABLE_RUNNER_UPDATE
-            value: "false"  # Recommended for security updates
-        volumeMounts:
-          - name: work
-            mountPath: /home/runner/_work
-          - name: dind-sock
-            mountPath: /var/run
-
-    # Required volumes for dind mode
-    volumes:
-      - name: work
-        emptyDir: {}
-      - name: dind-sock
-        emptyDir: {}
-      - name: dind-externals
-        emptyDir: {}
+maxRunners: 5
+minRunners: 1

@@ -41,4 +41,6 @@ kubectl get pods -n arc-runners
 kubectl get pods -n arc-runners --field-selector=status.phase!=Running
 kubectl logs -n arc-systems deployment/arc-gha-rs-controller 
 kubectl logs -n arc-systems ebpf-runners-cicd-754b578d-listener
+kubectl describe pod ebpf-runners-cicd-d65k6-runner-dmjsl -n arc-runners
+kubectl describe nodes github-runners-control-plane
 ```
