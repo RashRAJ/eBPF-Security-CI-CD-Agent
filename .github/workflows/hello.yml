@@ -1,16 +1,19 @@
-name: Test Workflow
+name: Hello World Workflow
 
-on:
-  push:
-    branches: [ main ]
-  workflow_dispatch:
+on: [push] # Trigger the workflow on push event
 
 jobs:
-  test:
-    runs-on: [self-hosted, kubernetes, harphies]
-    container:
-      image: ubuntu:latest
+  hello_world_job:
+    runs-on: [harphies] # Target runners with both these labels
     steps:
-      - uses: actions/checkout@v3
-      - name: Run test
-        run: echo "Hello from containerized job"
+      - name: Print Hello World
+        run: echo "Hello World" # Execute the command to print Hello World
+      - name: Show Environment Info
+        run: |
+          echo "Runner information:"
+          echo "-------------------"
+          echo "Hostname: $(hostname)"
+          echo "Operating System: $(uname -a)"
+          echo "Docker version: $(docker --version || echo 'Docker not available')"
+          echo "Current directory: $(pwd)"
+          echo "Directory contents: $(ls -la)"
