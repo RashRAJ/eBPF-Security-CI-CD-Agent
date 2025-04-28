@@ -41,7 +41,7 @@ jobs:
             --cgroupns=host \
             --volume=/sys/kernel/debug:/sys/kernel/debug:ro \
             --volume /tmp:/tmp \
-            --rm docker.io/kondukto/kntrl:0.1.3 \
+            --rm docker.io/kondukto/kntrl:v0.1.3 \
             run --mode=monitor --allowed-hosts=kondukto.io,${{ env.GITHUB_ACTIONS_URL }} --allow-local-ranges=true &
           sleep 5
           echo "kntrl agent started in background via Docker."
@@ -81,7 +81,7 @@ jobs:
             --cgroupns=host \
             --volume=/sys/kernel/debug:/sys/kernel/debug:ro \
             --volume /tmp:/tmp \
-            --rm docker.io/kondukto/kntrl:0.1.3 \
+            --rm docker.io/kondukto/kntrl:v0.1.3 \
             run --mode=trace --allowed-hosts=kondukto.io,${{ env.GITHUB_ACTIONS_URL }} --allow-local-ranges=true &
           sleep 5
           echo "kntrl agent started in background with prevention enabled."
