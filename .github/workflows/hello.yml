@@ -1,14 +1,18 @@
 name: Test Self-Hosted Runner
 
 on:
+  push: 
   workflow_dispatch:
 
 jobs:
   test:
     runs-on: [self-hosted, kubernetes, harphies]
     steps:
+      - uses: actions/checkout@v3  # This checks out your code
+      
       - name: Test Runner
         run: |
           echo "Hello from self-hosted runner"
           hostname
           env
+          ls -la  # This will list the files in your repository
