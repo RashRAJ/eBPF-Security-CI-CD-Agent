@@ -21,8 +21,8 @@ jobs:
 
       - name: Increase MEMLOCK Limit
         run: |
-          sudo sh -c "ulimit -l unlimited"
-          ulimit -l # Verify the limit
+          ulimit -l unlimited
+          ulimit -l # Verify the limit for the current user
 
       - name: Secured Build
         run: |
