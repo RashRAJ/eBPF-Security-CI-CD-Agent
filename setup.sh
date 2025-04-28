@@ -183,9 +183,18 @@ deploy_runners() {
     
     # Install the controller
     echo "Installing actions-runner-controller..."
-    helm install actions-runner-controller actions-runner-controller/actions-runner-controller \
-        --namespace ${RUNNER_NAMESPACE} \
-        --set syncPeriod=1m
+    
+    # Check if the helm release already exists
+    if helm list -n ${RUNNER_NAMESPACE} | grep -q "actions-runner-controller"; then
+        echo "Existing actions-runner-controller release found. Upgrading instead..."
+        helm upgrade actions-runner-controller actions-runner-controller/actions-runner-controller \
+            --namespace ${RUNNER_NAMESPACE} \
+            --set syncPeriod=1m
+    else
+        helm install actions-runner-controller actions-runner-controller/actions-runner-controller \
+            --namespace ${RUNNER_NAMESPACE} \
+            --set syncPeriod=1m
+    fi
     
     # Wait for controller to be ready
     echo "Waiting for controller to be ready..."
@@ -235,6 +244,26 @@ spec:
       labels:
         - self-hosted
         - kubernetes
+      env:
+        - name: GITHUB_URL
+          value: https://github.com
+        - name: ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER
+          value: "false"
+        - name: DISABLE_RUNNER_UPDATE
+          value: "true"
+        - name: RUNNER_FEATURE_FLAG_ONCE
+          value: "true"
+        - name: NODE_TLS_REJECT_UNAUTHORIZED
+          value: "0"
+        - name: NODE_OPTIONS
+          value: --tls-min-v1.0
+      volumes:
+        - name: docker-socket
+          hostPath:
+            path: /var/run/docker.sock
+      volumeMounts:
+        - name: docker-socket
+          mountPath: /var/run/docker.sock
 ---
 apiVersion: actions.summerwind.dev/v1alpha1
 kind: HorizontalRunnerAutoscaler
@@ -269,6 +298,26 @@ spec:
       labels:
         - self-hosted
         - kubernetes
+      env:
+        - name: GITHUB_URL
+          value: https://github.com
+        - name: ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER
+          value: "false"
+        - name: DISABLE_RUNNER_UPDATE
+          value: "true"
+        - name: RUNNER_FEATURE_FLAG_ONCE
+          value: "true"
+        - name: NODE_TLS_REJECT_UNAUTHORIZED
+          value: "0"
+        - name: NODE_OPTIONS
+          value: --tls-min-v1.0
+      volumes:
+        - name: docker-socket
+          hostPath:
+            path: /var/run/docker.sock
+      volumeMounts:
+        - name: docker-socket
+          mountPath: /var/run/docker.sock
 ---
 apiVersion: actions.summerwind.dev/v1alpha1
 kind: HorizontalRunnerAutoscaler
