@@ -1,5 +1,13 @@
 # Usage Instructions
 
+The ultimate goal is likely to demonstrate the effectiveness of the kntrl eBPF-based agent in identifying and potentially preventing malicious behavior during CI/CD pipeline execution. The use of a dedicated ebpf-runners-cicd runner highlights the need for specific kernel capabilities for this type of monitoring
+
+In summary, this pipeline aims to:
+
+* Establish a baseline: The build job runs a seemingly normal setup while the kntrl agent monitors system activity in the background.
+* Simulate a threat: The malicious-build job intentionally performs actions that could be indicative of a compromised build environment.
+* Verify security monitoring: The final step in the malicious-build job attempts to confirm if the kntrl agent (from the build job) was able to detect these suspicious activities.
+
 ## Deployment
 
 ```sh

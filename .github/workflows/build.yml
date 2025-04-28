@@ -27,7 +27,7 @@ jobs:
             --volume=/sys/kernel/debug:/sys/kernel/debug:ro \
             --volume /tmp:/tmp \
             --rm docker.io/kondukto/kntrl:latest \
-            --mode=monitor
+            run --mode=monitor
           echo "kntrl agent is running in the background."
 
   malicious-build:
