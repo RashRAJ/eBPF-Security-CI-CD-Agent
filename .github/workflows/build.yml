@@ -19,12 +19,6 @@ jobs:
           echo "Checking Docker availability:"
           docker --version || echo "Docker not available"
 
-      - name: Download kntrl (arm64)
-        run: |
-          curl -L -o kntrl https://github.com/kondukto-io/kntrl/releases/download/v0.1.3/kntrl_arm64.arm64
-          chmod +x kntrl
-          sudo mv kntrl /usr/local/bin/kntrl
-
       - name: Increase MEMLOCK limit
         run: |
           # Increase the memlock limit for the current session
@@ -35,14 +29,33 @@ jobs:
       - name: Start kntrl agent (Docker approach)
         run: |
           echo "Starting kntrl agent in monitor mode using Docker..."
+          # List available docker images for kondukto/kntrl
+          echo "Available kondukto/kntrl images:"
+          sudo docker search kondukto/kntrl
+          
+          # Try to pull the 0.1.3 image
+          echo "Attempting to pull kondukto/kntrl:0.1.3"
+          if sudo docker pull kondukto/kntrl:0.1.3; then
+            KNTRL_IMAGE="kondukto/kntrl:0.1.3"
+            echo "Successfully pulled 0.1.3 image"
+          else
+            echo "Failed to pull 0.1.3 image, falling back to 0.1.2"
+            sudo docker pull kondukto/kntrl:0.1.2
+            KNTRL_IMAGE="kondukto/kntrl:0.1.2"
+          fi
+          
+          # Run kntrl in monitor mode
           sudo docker run --privileged \
             --pid=host \
             --network=host \
             --cgroupns=host \
             --volume=/sys/kernel/debug:/sys/kernel/debug:ro \
             --volume /tmp:/tmp \
-            --rm docker.io/kondukto/kntrl:v0.1.3 \
+            --security-opt seccomp=unconfined \
+            --rm $KNTRL_IMAGE \
             run --mode=monitor --allowed-hosts=kondukto.io,${{ env.GITHUB_ACTIONS_URL }} --allow-local-ranges=true &
+          
+          # Wait to ensure kntrl has time to start
           sleep 5
           echo "kntrl agent started in background via Docker."
 
@@ -75,14 +88,29 @@ jobs:
       - name: Start kntrl agent (Docker approach - Prevent Mode)
         run: |
           echo "Starting kntrl agent in prevent mode using Docker..."
+          # Try to pull the 0.1.3 image
+          echo "Attempting to pull kondukto/kntrl:0.1.3"
+          if sudo docker pull kondukto/kntrl:0.1.3; then
+            KNTRL_IMAGE="kondukto/kntrl:0.1.3"
+            echo "Successfully pulled 0.1.3 image"
+          else
+            echo "Failed to pull 0.1.3 image, falling back to 0.1.2"
+            sudo docker pull kondukto/kntrl:0.1.2
+            KNTRL_IMAGE="kondukto/kntrl:0.1.2"
+          fi
+          
+          # Run kntrl in prevent/trace mode
           sudo docker run --privileged \
             --pid=host \
             --network=host \
             --cgroupns=host \
             --volume=/sys/kernel/debug:/sys/kernel/debug:ro \
             --volume /tmp:/tmp \
-            --rm docker.io/kondukto/kntrl:v0.1.3 \
+            --security-opt seccomp=unconfined \
+            --rm $KNTRL_IMAGE \
             run --mode=trace --allowed-hosts=kondukto.io,${{ env.GITHUB_ACTIONS_URL }} --allow-local-ranges=true &
+          
+          # Wait to ensure kntrl has time to start
           sleep 5
           echo "kntrl agent started in background with prevention enabled."
 
@@ -105,4 +133,6 @@ jobs:
             cat /tmp/kntrl.out
           else
             echo "kntrl log file not found."
+            echo "Trying to find logs from kntrl container:"
+            sudo docker ps -a | grep kntrl
           fi
