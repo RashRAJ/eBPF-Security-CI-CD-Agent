@@ -4,7 +4,7 @@ on: [push] # Trigger the workflow on push event
 
 jobs:
   hello_world_job:
-    runs-on: ebpf-runners-cicd-4lpfh-2t4l2
+    runs-on: [self-hosted, kubernetes, harphies, ARM64]
     steps:
       - name: Print Hello World
         run: echo "Hello World" # Execute the command to print Hello World
