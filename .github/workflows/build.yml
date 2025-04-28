@@ -27,7 +27,8 @@ jobs:
             --volume=/sys/kernel/debug:/sys/kernel/debug:ro \
             --volume /tmp:/tmp \
             --rm docker.io/kondukto/kntrl:latest \
-            run --mode=monitor
+            run --mode=monitor \
+            --allowed-hosts=kondukto.io,${{ env.GITHUB_ACTIONS_URL }}
           echo "kntrl agent is running in the background."
 
   malicious-build:
