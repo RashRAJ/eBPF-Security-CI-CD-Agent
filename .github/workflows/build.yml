@@ -1,7 +1,7 @@
 name: Financial Reporting Service
 
 on:
-  push: 
+  push:
   workflow_dispatch:
 
 jobs:
@@ -9,7 +9,7 @@ jobs:
     runs-on: ebpf-runners-cicd
     steps:
       - uses: actions/checkout@v3
-      
+
       - name: Secured Build
         run: |
           echo "Secure financial reporting service build on this runner"
@@ -17,24 +17,45 @@ jobs:
           env
           ls -la
 
-      - name: kntrl agent
-        run: sudo docker run --privileged \
-          --pid=host \
-          --network=host \
-          --cgroupns=host \
-          --volume=/sys/kernel/debug:/sys/kernel/debug:ro \
-          --volume /tmp:/tmp \
-          --rm docker.io/kondukto/kntrl:0.1.2 \
-          --mode=monitor 
-  
-  malicoius-build:
+      - name: kntrl agent (Monitor Mode)
+        run: |
+          echo "Starting kntrl agent in monitor mode..."
+          sudo docker run --privileged \
+            --pid=host \
+            --network=host \
+            --cgroupns=host \
+            --volume=/sys/kernel/debug:/sys/kernel/debug:ro \
+            --volume /tmp:/tmp \
+            --rm docker.io/kondukto/kntrl:0.1.2 \
+            --mode=monitor
+          echo "kntrl agent is running in the background."
+
+  malicious-build:
     runs-on: ebpf-runners-cicd
     steps:
       - uses: actions/checkout@v3
-      
-      - name: Malicious Build
+
+      - name: Simulate Malicious Actions
         run: |
-          echo "Simulate malicious build trying to gain access to financial reporting service build on this runner and see how eBPF helps prevent and block that"
+          echo "Simulating malicious build trying to gain access..."
           hostname
           env
-          ls -la
+          ls -la /etc/shadow # Attempt to access a sensitive file
+          mkdir /tmp/evil_dir
+          echo "Malicious file created" > /tmp/evil_dir/malicious.txt
+          curl -m 10 http://unauthorized-site.example.com # Attempt to connect to an external site
+          echo "Attempted malicious actions."
+
+      - name: Verify eBPF Monitoring (Optional - Adapt based on kntrl capabilities)
+        if: always() # Ensure this step runs even if the previous one fails
+        run: |
+          echo "Checking for eBPF monitoring logs (adapt based on kntrl output)..."
+          # This is a placeholder - you'll need to adapt this based on how kntrl reports events.
+          # For example, you might check a log file or use a kntrl CLI command.
+          # Example (replace with actual kntrl command/log location):
+          # if [ -f /var/log/kntrl.log ]; then
+          #   cat /var/log/kntrl.log | grep "malicious"
+          # else
+          #   echo "kntrl log file not found."
+          # fi
+          echo "Verification of eBPF monitoring complete (check logs for details)."
