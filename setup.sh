@@ -257,13 +257,20 @@ spec:
           value: "0"
         - name: NODE_OPTIONS
           value: --tls-min-v1.0
+        - name: DOCKER_HOST
+          value: "unix:///var/run/docker.sock"
+      containerMode: kubernetes
+      dockerEnabled: true
+      dockerdWithinRunnerContainer: true
+      ephemeral: false
+      workDir: /tmp/runner
+      volumeMounts:
+        - name: docker-socket
+          mountPath: /var/run/docker.sock
       volumes:
         - name: docker-socket
           hostPath:
             path: /var/run/docker.sock
-      volumeMounts:
-        - name: docker-socket
-          mountPath: /var/run/docker.sock
 ---
 apiVersion: actions.summerwind.dev/v1alpha1
 kind: HorizontalRunnerAutoscaler
@@ -311,13 +318,20 @@ spec:
           value: "0"
         - name: NODE_OPTIONS
           value: --tls-min-v1.0
+        - name: DOCKER_HOST
+          value: "unix:///var/run/docker.sock"
+      containerMode: kubernetes
+      dockerEnabled: true
+      dockerdWithinRunnerContainer: true
+      ephemeral: false
+      workDir: /tmp/runner
+      volumeMounts:
+        - name: docker-socket
+          mountPath: /var/run/docker.sock
       volumes:
         - name: docker-socket
           hostPath:
             path: /var/run/docker.sock
-      volumeMounts:
-        - name: docker-socket
-          mountPath: /var/run/docker.sock
 ---
 apiVersion: actions.summerwind.dev/v1alpha1
 kind: HorizontalRunnerAutoscaler
