@@ -1,0 +1,30 @@
+name: Financial Reporting Service
+
+on:
+  push: 
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ebpf-runners-cicd
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Test Runner
+        run: |
+          echo "Secure financial reporting service build on this runner"
+          hostname
+          env
+          ls -la  # This will list the files in your repository
+  
+  malicoius-build:
+    runs-on: ebpf-runners-cicd
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Test Runner
+        run: |
+          echo "Secure financial reporting service build on this runner"
+          hostname
+          env
+          ls -la  # This will list the files in your repository

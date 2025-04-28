@@ -1,41 +1,13 @@
-## Usage Instructions
+# Usage Instructions
 
-Make the script executable:
-```chmod +x setup.sh```
-
-
-Create a cluster with GitHub runners:
-
-For organization runners
-```
-./setup.sh create --token=ghp_your_token --owner=your-org-name --replicas=2
-```
-
-For repository runners
-```
-./setup.sh create --token=ghp_your_token --owner=your-org-name --repo=your-repo-name
-```
-Destroy the cluster:
-```
-bash./setup.sh destroy
-```
-
-Deploy runners to an existing cluster:
-```
-./setup.sh deploy --token=ghp_your_token --owner=your-org-name
-```
-
-./setup.sh clean
-
-...
-
-You can now run the script with a custom runner name:
-bash./setup.sh create --token=ghp_your_token --owner=rashraj --repo=eBPF-Security-CI-CD-Agent --name=ebpf-runners
-Or let the script automatically create a valid name:
-bash./setup.sh create --token=ghp_your_token --owner=rashraj --repo=eBPF-Security-CI-CD
+## Deployment
 
 ```sh
-./setup.sh clean
+# Deploy
+chmod +x setup.sh
+./setup.sh create --token=TOKEN --owner=rashraj --repo=eBPF-Security-CI-CD-Agent --name=ebpf-runners-cicd
+
+# Troubleshoot
 kubectl get ephemeralrunners -n arc-runners
 kubectl get pods -n arc-runners
 kubectl get pods -n arc-runners --field-selector=status.phase!=Running
@@ -43,4 +15,14 @@ kubectl logs -n arc-systems deployment/arc-gha-rs-controller
 kubectl logs -n arc-systems ebpf-runners-cicd-754b578d-listener
 kubectl describe pod ebpf-runners-cicd-d65k6-runner-dmjsl -n arc-runners
 kubectl describe nodes github-runners-control-plane
+
+# cleanup
+./setup.sh clean
+./setup.sh destroy
 ```
+
+## References
+
+- https://github.com/actions/actions-runner-controller
+- https://github.com/actions/actions-runner-controller/tree/master/charts/gha-runner-scale-set
+- https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners-with-actions-runner-controller/deploying-runner-scale-sets-with-actions-runner-controller
