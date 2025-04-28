@@ -1,0 +1,25 @@
+# Controller configuration
+# This file configures the runner controller itself
+
+# Authentication with GitHub
+githubConfigUrl: "https://github.com/${GITHUB_OWNER}"
+authSecret:
+  create: true
+  # Token will be substituted from script
+  github_token: "${GITHUB_TOKEN}"
+
+# Controller settings
+controllerServiceAccount:
+  name: "gha-controller-sa"
+
+# Metrics settings (fixed format for v0.10.0)
+# The error is related to controllerManagerAddr being an object instead of a string
+metrics:
+  # Use string format instead of object format for addresses
+  controllerManagerAddr: ":8080"
+  listenerAddr: ":8080"
+  listenerEndpoint: "/metrics"
+
+# Flags for certificate and RBAC handling
+certManagerEnabled: true
+createUserNamespace: true

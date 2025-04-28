@@ -25,6 +25,7 @@ Deploy runners to an existing cluster:
 ./setup.sh deploy --token=ghp_your_token --owner=your-org-name
 ```
 
+./setup.sh clean
 
 ...
 

@@ -10,7 +10,8 @@ NC='\033[0m' # No Color
 # Configuration variables
 CLUSTER_NAME="github-runners"
 GITHUB_TOKEN=""
-RUNNER_NAMESPACE="actions-runner-system"
+RUNNER_NAMESPACE="arc-runners"
+CONTROLLER_NAMESPACE="arc-systems"
 # Set these variables for your specific use case
 GITHUB_OWNER=""
 GITHUB_REPO=""
@@ -19,8 +20,8 @@ RUNNER_NAME=""
 MANIFESTS_DIR="./runner-manifests"
 # Kind cluster configuration in root directory
 KIND_CONFIG="./kind-cluster.yaml"
-# Token secret file path
-TOKEN_SECRET_FILE="$MANIFESTS_DIR/github-token-secret.yaml"
+# Chart version - set to 0.10.0 to avoid YAML parsing errors
+CHART_VERSION="0.10.0"
 
 # Function to display usage information
 usage() {
@@ -32,16 +33,19 @@ usage() {
     echo "  create         Create Kind cluster and deploy GitHub runners"
     echo "  destroy        Destroy Kind cluster"
     echo "  deploy         Deploy GitHub runners to existing cluster"
+    echo "  clean          Remove old CRDs from the cluster"
     echo ""
     echo "Options:"
     echo "  --token=<token>       GitHub Personal Access Token (required for create/deploy)"
     echo "  --owner=<org/user>    GitHub organization or username"
     echo "  --repo=<repo>         GitHub repository name (if empty, runners will be org-level)"
     echo "  --name=<name>         Name for runner (required for variable substitution in manifests)"
+    echo "  --version=<version>   Chart version to use (default: ${CHART_VERSION})"
     echo ""
     echo "Examples:"
     echo "  $0 create --token=ghp_xxxx --owner=myorg --repo=myrepo --name=myrunner"
-    echo "  $0 create --token=ghp_xxxx --owner=myorg --name=myrunner"
+    echo "  $0 create --token=ghp_xxxx --owner=myorg --name=myrunner --version=0.10.0"
+    echo "  $0 clean"
     echo "  $0 destroy"
     exit 1
 }
@@ -61,6 +65,9 @@ parse_args() {
                 ;;
             --name=*)
                 RUNNER_NAME="${arg#*=}"
+                ;;
+            --version=*)
+                CHART_VERSION="${arg#*=}"
                 ;;
             *)
                 # Unknown option
@@ -105,17 +112,15 @@ check_required_files() {
         exit 1
     fi
     
-    # Check runner manifests directory
-    if [ ! -d "$MANIFESTS_DIR" ]; then
-        echo -e "${RED}Error: Runner manifests directory $MANIFESTS_DIR does not exist.${NC}"
-        echo "Please create it and add your Kubernetes manifests before running this script."
+    # Check for runner values file
+    if [ ! -f "${MANIFESTS_DIR}/runner-values.yaml" ]; then
+        echo -e "${RED}Error: Runner values file not found at ${MANIFESTS_DIR}/runner-values.yaml${NC}"
         exit 1
     fi
     
-    # Check if there are any yaml files in the manifests directory
-    if [ ! "$(ls -A $MANIFESTS_DIR/*.yaml 2>/dev/null)" ]; then
-        echo -e "${RED}Error: No YAML files found in $MANIFESTS_DIR${NC}"
-        echo "Please add your runner manifests before continuing."
+    # Check for controller values file
+    if [ ! -f "${MANIFESTS_DIR}/controller-values.yaml" ]; then
+        echo -e "${RED}Error: Controller values file not found at ${MANIFESTS_DIR}/controller-values.yaml${NC}"
         exit 1
     fi
 }
@@ -140,12 +145,10 @@ create_cluster() {
 }
 
 # Function to update variables in YAML file
-apply_with_vars() {
+update_yaml_with_vars() {
     local file=$1
-    echo "Applying $file with variable substitution..."
-    
-    # Create a temporary file
-    TEMP_FILE=$(mktemp)
+    local dest=$2
+    echo "Updating $file with variable substitution to $dest..."
     
     # Replace variables with their values
     cat "$file" | \
@@ -153,13 +156,35 @@ apply_with_vars() {
         sed "s|\${RUNNER_NAME}|${RUNNER_NAME}|g" | \
         sed "s|\${GITHUB_OWNER}|${GITHUB_OWNER}|g" | \
         sed "s|\${GITHUB_REPO}|${GITHUB_REPO}|g" | \
-        sed "s|\${RUNNER_NAMESPACE}|${RUNNER_NAMESPACE}|g" > "$TEMP_FILE"
+        sed "s|\${RUNNER_NAMESPACE}|${RUNNER_NAMESPACE}|g" > "$dest"
     
-    # Apply the updated file
-    kubectl apply -f "$TEMP_FILE"
+    echo "File updated: $dest"
+}
+
+# Function to clean up old CRDs
+cleanup_old_crds() {
+    echo -e "${YELLOW}Cleaning up old CRDs...${NC}"
     
-    # Remove temporary file
-    rm "$TEMP_FILE"
+    # Remove old CRDs that might cause conflicts
+    kubectl delete crd autoscalingrunnersets.actions.github.com --ignore-not-found=true
+    kubectl delete crd ephemeralrunners.actions.github.com --ignore-not-found=true
+    kubectl delete crd ephemeralrunnerpods.actions.github.com --ignore-not-found=true
+    kubectl delete crd ephemeralrunnersets.actions.github.com --ignore-not-found=true
+    
+    # Check if there are any helm releases to clean up
+    if kubectl get namespace ${RUNNER_NAMESPACE} &>/dev/null; then
+        echo "Cleaning up existing runner releases in namespace ${RUNNER_NAMESPACE}..."
+        # List all helm releases in the runner namespace and delete them
+        helm list -n ${RUNNER_NAMESPACE} -q | xargs -r helm uninstall -n ${RUNNER_NAMESPACE}
+    fi
+    
+    if kubectl get namespace ${CONTROLLER_NAMESPACE} &>/dev/null; then
+        echo "Cleaning up existing controller releases in namespace ${CONTROLLER_NAMESPACE}..."
+        # List all helm releases in the controller namespace and delete them
+        helm list -n ${CONTROLLER_NAMESPACE} -q | xargs -r helm uninstall -n ${CONTROLLER_NAMESPACE}
+    fi
+    
+    echo -e "${GREEN}Cleanup completed.${NC}"
 }
 
 # Function to deploy GitHub runners
@@ -179,10 +204,16 @@ deploy_runners() {
         exit 1
     fi
     
-    echo -e "${YELLOW}Deploying GitHub Actions Runner Controller...${NC}"
+    echo -e "${YELLOW}Preparing for GitHub Actions Runners deployment using chart version ${CHART_VERSION}...${NC}"
     
-    # Check if required files exist
-    check_required_files
+    # Create temporary files with variable substitution
+    TEMP_CONTROLLER_VALUES=$(mktemp)
+    TEMP_RUNNER_VALUES=$(mktemp)
+    
+    update_yaml_with_vars "${MANIFESTS_DIR}/controller-values.yaml" "$TEMP_CONTROLLER_VALUES"
+    update_yaml_with_vars "${MANIFESTS_DIR}/runner-values.yaml" "$TEMP_RUNNER_VALUES"
+    
+    echo -e "${YELLOW}Deploying GitHub Actions Runner Controller...${NC}"
     
     # Install cert-manager (required for actions-runner-controller)
     echo "Installing cert-manager..."
@@ -194,60 +225,57 @@ deploy_runners() {
     kubectl wait --for=condition=available --timeout=300s deployment/cert-manager-webhook -n cert-manager
     kubectl wait --for=condition=available --timeout=300s deployment/cert-manager-cainjector -n cert-manager
     
-    # Add and update Helm repo
-    echo "Adding actions-runner-controller Helm repository..."
-    helm repo add actions-runner-controller https://actions-runner-controller.github.io/actions-runner-controller
-    helm repo update
+    # Create controller namespace
+    echo "Creating controller namespace..."
+    kubectl create namespace $CONTROLLER_NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
     
-    # Apply namespace first if it exists
-    if [ -f "$MANIFESTS_DIR/namespace.yaml" ]; then
-        echo "Applying namespace..."
-        apply_with_vars "$MANIFESTS_DIR/namespace.yaml"
+    # Create runner namespace
+    echo "Creating runner namespace..."
+    kubectl create namespace ${RUNNER_NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
+    
+    # Check if controller is already installed and uninstall it first
+    if helm list -n $CONTROLLER_NAMESPACE | grep -q "arc"; then
+        echo "Uninstalling existing controller release..."
+        helm uninstall arc -n $CONTROLLER_NAMESPACE
+        # Wait a bit for resources to be cleaned up
+        sleep 10
     fi
     
-    # Handle GitHub token secret
-    if [ -f "$TOKEN_SECRET_FILE" ]; then
-        echo "Applying GitHub token secret with substitution..."
-        apply_with_vars "$TOKEN_SECRET_FILE"
-    else
-        echo "Creating GitHub token secret dynamically..."
-        kubectl create namespace ${RUNNER_NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
-        kubectl create secret generic controller-manager \
-            -n ${RUNNER_NAMESPACE} \
-            --from-literal=github_token=${GITHUB_TOKEN} \
-            --dry-run=client -o yaml | kubectl apply -f -
-    fi
+    # Install the controller using the official OCI chart with version
+    echo "Installing gha-runner-scale-set-controller version ${CHART_VERSION}..."
+    helm install arc \
+      --namespace $CONTROLLER_NAMESPACE \
+      -f "$TEMP_CONTROLLER_VALUES" \
+      oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller --version=${CHART_VERSION}
     
-    # Install the controller
-    echo "Installing actions-runner-controller..."
-    
-    # Check if the helm release already exists
-    if helm list -n ${RUNNER_NAMESPACE} | grep -q "actions-runner-controller"; then
-        echo "Existing actions-runner-controller release found. Upgrading instead..."
-        helm upgrade actions-runner-controller actions-runner-controller/actions-runner-controller \
-            --namespace ${RUNNER_NAMESPACE} \
-            --set syncPeriod=1m
-    else
-        helm install actions-runner-controller actions-runner-controller/actions-runner-controller \
-            --namespace ${RUNNER_NAMESPACE} \
-            --set syncPeriod=1m
-    fi
-    
-    # Wait for controller to be ready
+    # Wait for controller to be ready with correct deployment name
     echo "Waiting for controller to be ready..."
-    kubectl wait --for=condition=available --timeout=300s deployment/actions-runner-controller -n ${RUNNER_NAMESPACE}
+    # Give some time for the deployment to be created
+    sleep 10
+    kubectl wait --for=condition=available --timeout=300s deployment/arc-gha-rs-controller -n $CONTROLLER_NAMESPACE
     
-    # Apply all runner manifests (skipping namespace and token secret which were already applied)
-    echo "Applying runner manifests..."
-    for manifest in "$MANIFESTS_DIR"/*.yaml; do
-        if [[ "$(basename "$manifest")" != "namespace.yaml" && "$(basename "$manifest")" != "github-token-secret.yaml" ]]; then
-            apply_with_vars "$manifest"
-        fi
-    done
+    # Check if runner scale set is already installed and uninstall it first
+    if helm list -n $RUNNER_NAMESPACE | grep -q "$RUNNER_NAME"; then
+        echo "Uninstalling existing runner scale set release..."
+        helm uninstall $RUNNER_NAME -n $RUNNER_NAMESPACE
+        # Wait a bit for resources to be cleaned up
+        sleep 10
+    fi
+    
+    # Install the runner scale set with version
+    echo "Installing runner scale set version ${CHART_VERSION}..."
+    helm install ${RUNNER_NAME} \
+      --namespace ${RUNNER_NAMESPACE} \
+      -f "$TEMP_RUNNER_VALUES" \
+      oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set --version=${CHART_VERSION}
+    
+    # Clean up temp files
+    rm "$TEMP_CONTROLLER_VALUES" "$TEMP_RUNNER_VALUES"
     
     echo -e "${GREEN}GitHub Runners deployment complete.${NC}"
     echo "You can check the status of your runners with:"
-    echo "kubectl get runners -n ${RUNNER_NAMESPACE}"
+    echo "kubectl get pods -n ${RUNNER_NAMESPACE}"
+    echo "kubectl logs -n ${RUNNER_NAMESPACE} ${RUNNER_NAME}-*-listener"
 }
 
 # Function to destroy the Kind cluster
@@ -272,6 +300,7 @@ case $COMMAND in
         check_prerequisites
         check_required_files
         create_cluster
+        cleanup_old_crds
         deploy_runners
         ;;
     destroy)
@@ -279,7 +308,13 @@ case $COMMAND in
         ;;
     deploy)
         check_prerequisites
+        check_required_files
+        cleanup_old_crds
         deploy_runners
+        ;;
+    clean)
+        check_prerequisites
+        cleanup_old_crds
         ;;
     *)
         usage

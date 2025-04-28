@@ -4,7 +4,7 @@ metadata:
   name: ${RUNNER_NAME}
   namespace: ${RUNNER_NAMESPACE}
 spec:
-  replicas: 2
+  replicas: 1
   template:
     spec:
       repository: ${GITHUB_OWNER}/${GITHUB_REPO}
@@ -25,12 +25,16 @@ spec:
           value: "0"
         - name: NODE_OPTIONS
           value: --tls-min-v1.0
-      # Remove containerMode: kubernetes
+        - name: DOCKER_HOST
+          value: unix:///var/run/docker.sock
       dockerEnabled: true
       dockerdWithinRunnerContainer: true
       ephemeral: false
       workDir: /tmp/runner
-      # Add the required workVolumeClaimTemplate with required storageClassName
+      securityContext:
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 121  # Docker group
       workVolumeClaimTemplate:
         accessModes:
           - ReadWriteOnce
@@ -38,22 +42,17 @@ spec:
           requests:
             storage: 1Gi
         storageClassName: standard
-      # Define container details properly with security context
       containers:
         - name: runner
-          securityContext:
-            # Don't run as root (0)
-            runAsUser: 1001
-            runAsGroup: 121
-            # Allow docker access but don't use privileged mode
-            privileged: true
+          image: ghcr.io/actions/actions-runner:latest
+          command: ["/home/runner/run.sh"]
           volumeMounts:
-            - name: docker-socket
+            - name: docker-sock
               mountPath: /var/run/docker.sock
             - name: work-dir
               mountPath: /tmp/runner
       volumes:
-        - name: docker-socket
+        - name: docker-sock
           hostPath:
             path: /var/run/docker.sock
         - name: work-dir
