@@ -6,7 +6,7 @@ on:
 
 jobs:
   test:
-    runs-on: [ebpf-runners-cicd]
+    runs-on: ebpf-runners-cicd
     steps:
       - uses: actions/checkout@v3  # This checks out your code
       
