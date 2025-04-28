@@ -1,0 +1,10 @@
+name: Hello World Workflow
+
+on: [push] # Trigger the workflow on push events
+
+jobs:
+  hello_world_job:
+    runs-on: ubuntu-latest # Use the latest Ubuntu runner
+    steps:
+      - name: Print Hello World
+        run: echo "Hello World" # Execute the command to print Hello World
