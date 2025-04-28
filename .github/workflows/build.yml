@@ -10,7 +10,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       
-      - name: Test Runner
+      - name: Secured Build
         run: |
           echo "Secure financial reporting service build on this runner"
           hostname
@@ -22,7 +22,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       
-      - name: Test Runner
+      - name: Malicious Build
         run: |
           echo "Secure financial reporting service build on this runner"
           hostname
