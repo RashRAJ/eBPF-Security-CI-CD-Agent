@@ -1,37 +1,31 @@
-# GitHub Actions Runner Scale Set Configuration for v0.11.0
-
-# GitHub configuration
+# Updated runner values with container images and reduced resources for M1 Mac
 githubConfigUrl: "https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}"
-
-# GitHub authentication - the script will replace this token placeholder
 githubConfigSecret:
   github_token: "${GITHUB_TOKEN}"
 
-# Runner labels that can be used in GitHub workflows
+# Runner labels
 labels:
   - self-hosted
   - kubernetes
   - harphies
 
-# Container mode configuration - Docker-in-Docker (dind)
+# Docker-in-Docker configuration with images specified
 containerMode:
   type: dind
 
-# Runner pool size
-minRunners: 1
-maxRunners: 3
-
-# The new listenerMetrics field that's required in v0.11.0
-# If you don't need metrics, use an empty config
-listenerMetrics:
-  prometheus:
-    enabled: false
-
-# Runner pod template configuration
+# Add container images with reduced resource requirements
 template:
   spec:
     containers:
       - name: runner
+        image: ghcr.io/actions/actions-runner:latest
+        resources:
+          limits:
+            cpu: "200m"
+            memory: "256Mi"
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
         env:
           - name: GITHUB_URL
             value: https://github.com
@@ -45,3 +39,13 @@ template:
             value: "0"
           - name: NODE_OPTIONS
             value: --tls-min-v1.0
+    initContainers:
+      - name: init-dind-externals
+        image: ghcr.io/actions/actions-runner:latest
+        resources:
+          limits:
+            cpu: "100m"
+            memory: "128Mi"
+          requests:
+            cpu: "50m"
+            memory: "64Mi"
