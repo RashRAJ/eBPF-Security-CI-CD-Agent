@@ -6,7 +6,7 @@ on:
 
 jobs:
   test:
-    runs-on: [self-hosted, kubernetes, harphies]
+    runs-on: [ebpf-runners-cicd]
     steps:
       - uses: actions/checkout@v3  # This checks out your code
       
