@@ -17,16 +17,16 @@ jobs:
           env
           ls -la
 
-      - name: kntrl agent (Monitor Mode)
+      - name: kntrl agent (Monitor Mode - Latest)
         run: |
-          echo "Starting kntrl agent in monitor mode..."
+          echo "Starting kntrl agent in monitor mode (latest)..."
           sudo docker run --privileged \
             --pid=host \
             --network=host \
             --cgroupns=host \
             --volume=/sys/kernel/debug:/sys/kernel/debug:ro \
             --volume /tmp:/tmp \
-            --rm docker.io/kondukto/kntrl:0.1.2 \
+            --rm docker.io/kondukto/kntrl:latest \
             --mode=monitor
           echo "kntrl agent is running in the background."
 
@@ -47,14 +47,13 @@ jobs:
           echo "Attempted malicious actions."
 
       - name: Verify eBPF Monitoring (Optional - Adapt based on kntrl capabilities)
-        if: always() # Ensure this step runs even if the previous one fails
+        if: always()
         run: |
           echo "Checking for eBPF monitoring logs (adapt based on kntrl output)..."
-          # This is a placeholder - you'll need to adapt this based on how kntrl reports events.
-          # For example, you might check a log file or use a kntrl CLI command.
+          # Adapt this based on how kntrl reports events (e.g., log file, CLI command)
           # Example (replace with actual kntrl command/log location):
-          # if [ -f /var/log/kntrl.log ]; then
-          #   cat /var/log/kntrl.log | grep "malicious"
+          # if [ -f /tmp/kntrl.out ]; then
+          #   cat /tmp/kntrl.out | grep "malicious"
           # else
           #   echo "kntrl log file not found."
           # fi
