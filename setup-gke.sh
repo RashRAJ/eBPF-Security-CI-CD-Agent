@@ -16,22 +16,27 @@ CONTROLLER_NAMESPACE="arc-systems"
 GITHUB_OWNER=""
 GITHUB_REPO=""
 RUNNER_NAME=""
+# GKE specific configuration
+GKE_REGION="us-central1"
+GKE_PROJECT_ID=""
+GKE_NODE_COUNT="3"
+GKE_MIN_NODES="1"
+GKE_MAX_NODES="5"
+GKE_MACHINE_TYPE="t2a-standard-2" # ARM-based machine type
 # Directory for runner YAML files
 MANIFESTS_DIR="./runner-manifests"
-# Kind cluster configuration in root directory
-KIND_CONFIG="./kind-cluster.yaml"
 # Chart version - set to 0.10.0 to avoid YAML parsing errors
 CHART_VERSION="0.10.0"
 
 # Function to display usage information
 usage() {
-    echo "GitHub Self-Hosted Runner Setup Script"
+    echo "GitHub Self-Hosted Runner Setup Script for GKE"
     echo ""
     echo "Usage: $0 [command] [options]"
     echo ""
     echo "Commands:"
-    echo "  create         Create Kind cluster and deploy GitHub runners"
-    echo "  destroy        Destroy Kind cluster"
+    echo "  create         Create GKE cluster and deploy GitHub runners"
+    echo "  destroy        Destroy GKE cluster"
     echo "  deploy         Deploy GitHub runners to existing cluster"
     echo "  clean          Remove old CRDs from the cluster"
     echo ""
@@ -41,12 +46,17 @@ usage() {
     echo "  --repo=<repo>         GitHub repository name (if empty, runners will be org-level)"
     echo "  --name=<name>         Name for runner (required for variable substitution in manifests)"
     echo "  --version=<version>   Chart version to use (default: ${CHART_VERSION})"
+    echo "  --project=<project>   GCP Project ID (required for GKE operations)"
+    echo "  --region=<region>     GCP Region for cluster (default: ${GKE_REGION})"
+    echo "  --node-count=<count>  Initial node count (default: ${GKE_NODE_COUNT})"
+    echo "  --min-nodes=<count>   Minimum nodes for autoscaling (default: ${GKE_MIN_NODES})"
+    echo "  --max-nodes=<count>   Maximum nodes for autoscaling (default: ${GKE_MAX_NODES})"
     echo ""
     echo "Examples:"
-    echo "  $0 create --token=ghp_xxxx --owner=myorg --repo=myrepo --name=myrunner"
-    echo "  $0 create --token=ghp_xxxx --owner=myorg --name=myrunner --version=0.10.0"
-    echo "  $0 clean"
-    echo "  $0 destroy"
+    echo "  $0 create --token=ghp_xxxx --owner=myorg --repo=myrepo --name=myrunner --project=my-gcp-project"
+    echo "  $0 create --token=ghp_xxxx --owner=myorg --name=myrunner --project=my-gcp-project --region=us-west1"
+    echo "  $0 clean --project=my-gcp-project"
+    echo "  $0 destroy --project=my-gcp-project"
     exit 1
 }
 
@@ -69,6 +79,21 @@ parse_args() {
             --version=*)
                 CHART_VERSION="${arg#*=}"
                 ;;
+            --project=*)
+                GKE_PROJECT_ID="${arg#*=}"
+                ;;
+            --region=*)
+                GKE_REGION="${arg#*=}"
+                ;;
+            --node-count=*)
+                GKE_NODE_COUNT="${arg#*=}"
+                ;;
+            --min-nodes=*)
+                GKE_MIN_NODES="${arg#*=}"
+                ;;
+            --max-nodes=*)
+                GKE_MAX_NODES="${arg#*=}"
+                ;;
             *)
                 # Unknown option
                 ;;
@@ -80,10 +105,10 @@ parse_args() {
 check_prerequisites() {
     echo -e "${YELLOW}Checking prerequisites...${NC}"
     
-    # Check for kind
-    if ! command -v kind &> /dev/null; then
-        echo -e "${RED}Error: kind is not installed. Please install kind first.${NC}"
-        echo "Visit: https://kind.sigs.k8s.io/docs/user/quick-start/#installation"
+    # Check for gcloud
+    if ! command -v gcloud &> /dev/null; then
+        echo -e "${RED}Error: gcloud CLI is not installed. Please install gcloud first.${NC}"
+        echo "Visit: https://cloud.google.com/sdk/docs/install"
         exit 1
     fi
     
@@ -106,12 +131,6 @@ check_prerequisites() {
 
 # Function to check if required files exist
 check_required_files() {
-    # Check kind cluster config
-    if [ ! -f "$KIND_CONFIG" ]; then
-        echo -e "${RED}Error: Kind cluster configuration not found at $KIND_CONFIG${NC}"
-        exit 1
-    fi
-    
     # Check for runner values file
     if [ ! -f "${MANIFESTS_DIR}/runner-values.yaml" ]; then
         echo -e "${RED}Error: Runner values file not found at ${MANIFESTS_DIR}/runner-values.yaml${NC}"
@@ -125,6 +144,55 @@ check_required_files() {
     fi
 }
 
+# Check for required GCP project ID
+check_gcp_project() {
+    if [ -z "$GKE_PROJECT_ID" ]; then
+        echo -e "${RED}Error: GCP Project ID is required. Use --project=<project-id>${NC}"
+        exit 1
+    fi
+    
+    # Set the active project
+    echo -e "${YELLOW}Setting active GCP project to ${GKE_PROJECT_ID}...${NC}"
+    gcloud config set project "$GKE_PROJECT_ID"
+}
+
+# Function to create the GKE cluster
+create_cluster() {
+    echo -e "${YELLOW}Checking if cluster '${CLUSTER_NAME}' already exists in project ${GKE_PROJECT_ID}, region ${GKE_REGION}...${NC}"
+    
+    # Check if cluster already exists
+    if gcloud container clusters list --project="$GKE_PROJECT_ID" --region="$GKE_REGION" --filter="name=$CLUSTER_NAME" | grep -q "$CLUSTER_NAME"; then
+        echo -e "${YELLOW}Cluster '${CLUSTER_NAME}' already exists.${NC}"
+        echo -e "${YELLOW}Using existing cluster.${NC}"
+    else
+        echo -e "${YELLOW}Creating GKE cluster '${CLUSTER_NAME}'...${NC}"
+        
+        # Create a GKE cluster with ARM nodes and latest Ubuntu with containerd
+        gcloud container clusters create "$CLUSTER_NAME" \
+            --project="$GKE_PROJECT_ID" \
+            --region="$GKE_REGION" \
+            --machine-type="$GKE_MACHINE_TYPE" \
+            --num-nodes="$GKE_NODE_COUNT" \
+            --min-nodes="$GKE_MIN_NODES" \
+            --max-nodes="$GKE_MAX_NODES" \
+            --enable-autoscaling \
+            --node-locations="${GKE_REGION}-a,${GKE_REGION}-b" \
+            --image-type="COS_CONTAINERD" \
+            --enable-ip-alias \
+            --workload-pool="${GKE_PROJECT_ID}.svc.id.goog" \
+            --no-enable-master-authorized-networks
+        
+        echo -e "${GREEN}GKE cluster '${CLUSTER_NAME}' created successfully.${NC}"
+    fi
+    
+    # Get credentials for the cluster
+    echo -e "${YELLOW}Getting credentials for cluster...${NC}"
+    gcloud container clusters get-credentials "$CLUSTER_NAME" --region="$GKE_REGION" --project="$GKE_PROJECT_ID"
+    
+    # Display cluster info
+    echo -e "${YELLOW}Cluster information:${NC}"
+    kubectl cluster-info
+}
 
 # Function to update variables in YAML file
 update_yaml_with_vars() {
@@ -260,11 +328,11 @@ deploy_runners() {
     echo "kubectl logs -n ${RUNNER_NAMESPACE} ${RUNNER_NAME}-*-listener"
 }
 
-# Function to destroy the Kind cluster
+# Function to destroy the GKE cluster
 destroy_cluster() {
-    echo -e "${YELLOW}Destroying Kind cluster '${CLUSTER_NAME}'...${NC}"
-    kind delete cluster --name ${CLUSTER_NAME}
-    echo -e "${GREEN}Kind cluster '${CLUSTER_NAME}' destroyed successfully.${NC}"
+    echo -e "${YELLOW}Destroying GKE cluster '${CLUSTER_NAME}' in project ${GKE_PROJECT_ID}, region ${GKE_REGION}...${NC}"
+    gcloud container clusters delete "$CLUSTER_NAME" --region="$GKE_REGION" --project="$GKE_PROJECT_ID" --quiet
+    echo -e "${GREEN}GKE cluster '${CLUSTER_NAME}' destroyed successfully.${NC}"
 }
 
 # Main script execution
@@ -281,19 +349,23 @@ case $COMMAND in
     create)
         check_prerequisites
         check_required_files
+        check_gcp_project
         create_cluster
         deploy_runners
         ;;
     destroy)
+        check_gcp_project
         destroy_cluster
         ;;
     deploy)
         check_prerequisites
         check_required_files
+        check_gcp_project
         deploy_runners
         ;;
     clean)
         check_prerequisites
+        check_gcp_project
         cleanup_old_crds
         ;;
     *)
