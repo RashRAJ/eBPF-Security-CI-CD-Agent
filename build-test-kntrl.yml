@@ -1,0 +1,129 @@
+name: Financial Reporting Service
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ebpf-runners-cicd
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Debug Pod Setup
+        run: |
+          echo "=== Pod Environment Information ==="
+          echo "Checking kernel version:"
+          uname -r
+          echo "Checking system architecture:"
+          uname -m
+          echo "Checking Docker availability:"
+          docker --version || echo "Docker not available"
+          echo "Checking mounted volumes:"
+          ls -la /sys/kernel/debug || echo "Debug filesystem not mounted"
+          ls -la /lib/modules || echo "Modules directory not mounted"
+          echo "Checking container processes:"
+          ps aux
+          echo "Checking available containers:"
+          env | grep CONTAINER
+          echo "Checking pod hostname:"
+          hostname
+
+      - name: Manual kntrl Setup
+        run: |
+          echo "Setting up kntrl manually since sidecar is not running..."
+          curl -L -o kntrl https://github.com/kondukto-io/kntrl/releases/download/v0.1.3/kntrl_arm64.arm64
+          chmod +x kntrl
+          sudo mv kntrl /usr/local/bin/kntrl
+          
+          # Increase the memlock limit for the current session
+          sudo sh -c "ulimit -l unlimited"
+          
+          # Start kntrl agent
+          sudo /usr/local/bin/kntrl run --mode=monitor \
+            --allowed-hosts=github.com,api.github.com,docker.io \
+            --allow-local-ranges=true \
+            --verbose &
+          
+          sleep 5
+          echo "kntrl started manually"
+          ps aux | grep kntrl
+
+      - name: Check Environment
+        run: |
+          echo "Checking kernel version:"
+          uname -r
+          echo "Checking system architecture:"
+          uname -m
+          echo "Checking Docker availability:"
+          docker --version || echo "Docker not available"
+          echo "Checking kntrl status:"
+          ps aux | grep kntrl
+
+      - name: Verify kntrl Configuration
+        run: |
+          echo "Verifying kntrl security configuration..."
+          # Check if kntrl log file exists (created by sidecar)
+          if [ -f /tmp/kntrl.log ]; then
+            echo "✅ kntrl is running (log file exists)"
+          else 
+            echo "⚠️ kntrl log file not found, checking processes"
+            ps aux | grep kntrl
+          fi
+          
+          # Print kntrl version if available
+          if [ -f /kntrl ]; then
+            /kntrl --version || echo "Could not determine kntrl version"
+          fi
+
+      - name: Secured Build
+        run: |
+          echo "Secure financial reporting service build on this runner"
+          hostname
+          env
+          ls -la
+
+  malicious-build:
+    runs-on: ebpf-runners-cicd
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Verify kntrl Security Setup
+        run: |
+          echo "Verifying kntrl security setup..."
+          # Check if kntrl is running
+          ps aux | grep kntrl
+          
+          # Check for log file
+          if [ -f /tmp/kntrl.log ]; then
+            echo "kntrl log file exists"
+            tail -n 10 /tmp/kntrl.log
+          else
+            echo "kntrl log file not found"
+          fi
+
+      - name: Simulate Malicious Actions
+        run: |
+          echo "Simulating malicious build trying to gain access..."
+          hostname
+          env
+          ls -la /etc/shadow # Attempt to access a sensitive file
+          mkdir /tmp/evil_dir
+          echo "Malicious file created" > /tmp/evil_dir/malicious.txt
+          curl -m 10 http://unauthorized-site.example.com # Attempt to connect to an external site
+          echo "Attempted malicious actions."
+
+      - name: Check kntrl Logs
+        if: always()
+        run: |
+          echo "Checking kntrl logs..."
+          if [ -f /tmp/kntrl.log ]; then
+            echo "====== Last 50 lines of kntrl log ======"
+            tail -n 50 /tmp/kntrl.log
+          elif [ -f /tmp/kntrl.out ]; then
+            echo "====== Last 50 lines of kntrl.out ======"
+            tail -n 50 /tmp/kntrl.out
+          else
+            echo "No kntrl logs found, checking process status:"
+            ps aux | grep kntrl
+          fi

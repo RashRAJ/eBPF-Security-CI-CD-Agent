@@ -1,0 +1,9 @@
+githubConfigUrl: "https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}"
+githubConfigSecret:
+  github_token: "${GITHUB_TOKEN}"
+
+containerMode:
+  type: dind
+
+maxRunners: 5
+minRunners: 1
