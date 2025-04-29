@@ -30,6 +30,7 @@ chmod +x setup-gke.sh
 ./setup-gke.sh destroy --project=my-gcp-project
 
 # Troubleshoot
+kubectl apply -f test-pod.yaml 
 kubectl get ephemeralrunners -n arc-runners
 kubectl get pods -n arc-runners
 kubectl get pods -n arc-runners --field-selector=status.phase!=Running
