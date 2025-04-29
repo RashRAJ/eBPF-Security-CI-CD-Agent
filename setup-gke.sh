@@ -317,98 +317,6 @@ deploy_runners() {
         echo -e "${GREEN}No architecture taints found.${NC}"
     fi
     
-    # Install cert-manager (required for actions-runner-controller)
-    echo "Installing cert-manager..."
-    
-    # Check if cert-manager is already installed
-    if kubectl get namespace cert-manager &>/dev/null; then
-        echo "cert-manager namespace already exists, checking deployments..."
-        if kubectl get deployment -n cert-manager | grep -q cert-manager; then
-            echo "cert-manager appears to be already installed, skipping installation."
-        else
-            echo "cert-manager namespace exists but deployments not found, reinstalling..."
-            kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.1/cert-manager.yaml
-            # Wait for namespace to be properly setup
-            sleep 30
-        fi
-    else
-        echo "Installing cert-manager from scratch..."
-        kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.1/cert-manager.yaml
-        # Wait for namespace to be properly setup
-        sleep 30
-    fi
-    
-    # Patch cert-manager deployments with ARM64 tolerations (in case taint removal didn't work)
-    echo "Adding ARM64 tolerations to cert-manager deployments..."
-    
-    # Function to patch a deployment with ARM64 tolerations
-    patch_deployment_for_arm64() {
-        local deployment=$1
-        echo "Patching $deployment with ARM64 tolerations..."
-        
-        # Check if deployment exists
-        if kubectl get deployment $deployment -n cert-manager &>/dev/null; then
-            # Add tolerations using kubectl patch
-            kubectl patch deployment $deployment -n cert-manager --type=json -p='[
-              {
-                "op": "add", 
-                "path": "/spec/template/spec/tolerations", 
-                "value": [{"key": "kubernetes.io/arch", "operator": "Equal", "value": "arm64", "effect": "NoSchedule"}]
-              }
-            ]' || echo "Failed to patch $deployment, but continuing..."
-        else
-            echo "Deployment $deployment not found yet, skipping patch."
-        fi
-    }
-    
-    # Patch all cert-manager deployments
-    patch_deployment_for_arm64 cert-manager
-    patch_deployment_for_arm64 cert-manager-cainjector
-    patch_deployment_for_arm64 cert-manager-webhook
-    
-    # Wait for cert-manager to be ready with improved error handling
-    echo "Waiting for cert-manager to be ready..."
-    
-    # Increase timeout and add retry logic
-    TIMEOUT=600  # 10 minutes instead of 5
-    RETRY_COUNT=0
-    MAX_RETRIES=3
-    
-    wait_for_deployment() {
-        local deployment=$1
-        echo "Waiting for ${deployment} to be ready..."
-        if ! kubectl wait --for=condition=available --timeout=${TIMEOUT}s deployment/${deployment} -n cert-manager; then
-            echo -e "${YELLOW}Warning: Timed out waiting for ${deployment}. Checking deployment status...${NC}"
-            kubectl get deployment/${deployment} -n cert-manager -o wide
-            kubectl describe deployment/${deployment} -n cert-manager
-            return 1
-        fi
-        return 0
-    }
-    
-    # Try to wait for all cert-manager components with retries
-    while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-        if wait_for_deployment "cert-manager" && \
-           wait_for_deployment "cert-manager-webhook" && \
-           wait_for_deployment "cert-manager-cainjector"; then
-            echo -e "${GREEN}All cert-manager components are ready.${NC}"
-            break
-        else
-            RETRY_COUNT=$((RETRY_COUNT+1))
-            if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
-                echo -e "${YELLOW}Retry ${RETRY_COUNT}/${MAX_RETRIES}: Waiting for cert-manager components...${NC}"
-                echo "Checking cert-manager namespace for issues:"
-                kubectl get pods -n cert-manager
-                echo "Waiting 60 seconds before retrying..."
-                sleep 60
-            else
-                echo -e "${YELLOW}Warning: Could not confirm all cert-manager components are ready after ${MAX_RETRIES} attempts.${NC}"
-                echo -e "${YELLOW}Proceeding anyway, but you may need to check cert-manager manually.${NC}"
-                # Continue despite the error - sometimes cert-manager works even when the wait times out
-            fi
-        fi
-    done
-    
     # Create controller namespace
     echo "Creating controller namespace..."
     kubectl create namespace $CONTROLLER_NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
@@ -424,25 +332,6 @@ deploy_runners() {
         # Wait a bit for resources to be cleaned up
         sleep 10
     fi
-    
-    # Add ARM64 tolerations to the controller installation
-    echo "Creating custom values file with ARM64 tolerations for controller..."
-    cat > "$TEMP_CONTROLLER_VALUES.arm64" << EOF
-$(cat "$TEMP_CONTROLLER_VALUES")
-runner:
-  tolerations:
-  - key: "kubernetes.io/arch"
-    operator: "Equal"
-    value: "arm64"
-    effect: "NoSchedule"
-controller:
-  tolerations:
-  - key: "kubernetes.io/arch"
-    operator: "Equal"
-    value: "arm64"
-    effect: "NoSchedule"
-EOF
-    TEMP_CONTROLLER_VALUES="$TEMP_CONTROLLER_VALUES.arm64"
     
     # Install the controller using the official OCI chart with version
     echo "Installing/upgrading gha-runner-scale-set-controller version ${CHART_VERSION}..."
@@ -499,20 +388,6 @@ EOF
         # Wait a bit for resources to be cleaned up
         sleep 10
     fi
-    
-    # Add ARM64 tolerations to the runner scale set
-    echo "Creating custom values file with ARM64 tolerations for runner scale set..."
-    cat > "$TEMP_RUNNER_VALUES.arm64" << EOF
-$(cat "$TEMP_RUNNER_VALUES")
-template:
-  spec:
-    tolerations:
-    - key: "kubernetes.io/arch"
-      operator: "Equal"
-      value: "arm64"
-      effect: "NoSchedule"
-EOF
-    TEMP_RUNNER_VALUES="$TEMP_RUNNER_VALUES.arm64"
     
     # Install the runner scale set with version
     echo "Installing/upgrading runner scale set version ${CHART_VERSION}..."
