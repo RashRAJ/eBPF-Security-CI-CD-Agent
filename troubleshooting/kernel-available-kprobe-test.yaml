@@ -1,0 +1,104 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kprobe-checker
+spec:
+  hostNetwork: true
+  hostPID: true
+  containers:
+  - name: kprobe-checker
+    image: alpine:latest
+    command: ["/bin/sh", "-c"]
+    args:
+      - |
+        echo "Installing dependencies..."
+        apk add --no-cache grep findutils coreutils
+
+        echo "==== Kernel Information ===="
+        uname -a
+        
+        echo "==== Checking available kprobes ===="
+        # Check if kprobe related files exist
+        if [ -f /sys/kernel/debug/kprobes/list ]; then
+          echo "Active kprobes:"
+          cat /sys/kernel/debug/kprobes/list
+        else
+          echo "No kprobes list file found at /sys/kernel/debug/kprobes/list"
+        fi
+        
+        echo "==== Checking available tracepoints ===="
+        if [ -d /sys/kernel/debug/tracing/events ]; then
+          echo "Available tracepoint categories:"
+          ls -la /sys/kernel/debug/tracing/events
+          
+          echo "Network related tracepoints:"
+          find /sys/kernel/debug/tracing/events -name "tcp*" -o -name "ip*" -o -name "net*" -o -name "sock*" | sort
+        else
+          echo "No tracepoints directory found at /sys/kernel/debug/tracing/events"
+        fi
+        
+        echo "==== Checking network functions in kallsyms ===="
+        if [ -f /proc/kallsyms ]; then
+          echo "Looking for specific functions kntrl tries to use:"
+          echo "1. tcp_v4_connect:"
+          grep tcp_v4_connect /proc/kallsyms || echo "Not found"
+          
+          echo "2. ip4_datagram_connect:"
+          grep ip4_datagram_connect /proc/kallsyms || echo "Not found"
+          
+          echo "3. skb_consume_udp:"
+          grep skb_consume_udp /proc/kallsyms || echo "Not found"
+          
+          echo "4. Similar TCP/IP connection functions:"
+          grep -E "tcp.*connect|ip.*connect|udp.*connect" /proc/kallsyms
+          
+          echo "Available network related functions (sample):"
+          grep -E "^[0-9a-f]+ [Tt] (tcp|ip|udp|sock)_" /proc/kallsyms | head -30
+        else
+          echo "No kallsyms file found at /proc/kallsyms"
+        fi
+        
+        echo "==== Checking BPF features ===="
+        if [ -d /sys/fs/bpf ]; then
+          echo "BPF filesystem contents:"
+          ls -la /sys/fs/bpf
+        else
+          echo "No BPF filesystem found at /sys/fs/bpf"
+        fi
+        
+        echo "==== Checking kernel BPF capabilities ===="
+        if [ -f /proc/sys/net/core/bpf_jit_enable ]; then
+          echo "BPF JIT status: $(cat /proc/sys/net/core/bpf_jit_enable)"
+        else
+          echo "No BPF JIT config found"
+        fi
+        
+        echo "==== Done ===="
+        echo "Going to sleep to keep logs available..."
+        sleep infinity
+    securityContext:
+      privileged: true
+    resources:
+      requests:
+        memory: "128Mi"
+        cpu: "100m"
+      limits:
+        memory: "256Mi"
+        cpu: "200m"
+    volumeMounts:
+    - name: sys-kernel-debug
+      mountPath: /sys/kernel/debug
+    - name: sys-fs-bpf
+      mountPath: /sys/fs/bpf
+    - name: proc
+      mountPath: /proc
+  volumes:
+  - name: sys-kernel-debug
+    hostPath:
+      path: /sys/kernel/debug
+  - name: sys-fs-bpf
+    hostPath:
+      path: /sys/fs/bpf
+  - name: proc
+    hostPath:
+      path: /proc
