@@ -29,26 +29,6 @@ jobs:
           echo "Checking pod hostname:"
           hostname
 
-      - name: Manual kntrl Setup
-        run: |
-          echo "Setting up kntrl manually since sidecar is not running..."
-          curl -L -o kntrl https://github.com/kondukto-io/kntrl/releases/download/v0.1.3/kntrl_arm64.arm64
-          chmod +x kntrl
-          sudo mv kntrl /usr/local/bin/kntrl
-          
-          # Increase the memlock limit for the current session
-          sudo sh -c "ulimit -l unlimited"
-          
-          # Start kntrl agent
-          sudo /usr/local/bin/kntrl run --mode=monitor \
-            --allowed-hosts=github.com,api.github.com,docker.io \
-            --allow-local-ranges=true \
-            --verbose &
-          
-          sleep 5
-          echo "kntrl started manually"
-          ps aux | grep kntrl
-
       - name: Check Environment
         run: |
           echo "Checking kernel version:"
