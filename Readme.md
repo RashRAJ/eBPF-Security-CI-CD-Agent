@@ -16,13 +16,18 @@ chmod +x setup.sh
 ./setup.sh create --token=TOKEN --owner=rashraj --repo=eBPF-Security-CI-CD-Agent --name=ebpf-runners-cicd
 
 # Deploy a GKE cluster
-./script-gke.sh create --token=ghp_xxxx --owner=myorg --repo=myrepo --name=myrunner --project=my-gcp-project
+chmod +x setup-gke.sh
+
+./setuo-gke.sh create --token=ghp_xxxx --owner=rashraj --repo=eBPF-Security-CI-CD-Agent --name=myrunner --project=my-gcp-project
+
 # Deploy runners to an existing cluster
-./script-gke.sh deploy --token=ghp_xxxx --owner=myorg --name=myrunner --project=my-gcp-project
+./setup-gke.sh deploy --token=ghp_xxxx --owner=myorg --name=myrunner --project=my-gcp-project
+
 # Clean up old CRDs
-./script-gke.sh clean --project=my-gcp-project
+./setup-gke.sh clean --project=my-gcp-project
+
 # Destroy the cluster
-./script-gke.sh destroy --project=my-gcp-project
+./setup-gke.sh destroy --project=my-gcp-project
 
 # Troubleshoot
 kubectl get ephemeralrunners -n arc-runners
