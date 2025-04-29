@@ -4,7 +4,7 @@ on: [push] # Trigger the workflow on push event
 
 jobs:
   hello_world_job:
-    runs-on: ebpf-runners
+    runs-on: epbfrunner
     steps:
       - name: Print Hello World
         run: echo "Hello World" # Execute the command to print Hello World
