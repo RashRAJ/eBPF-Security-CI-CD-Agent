@@ -6,7 +6,7 @@ on:
 
 jobs:
   build:
-    runs-on: ebpf-runners-cicd
+    runs-on:  epbfrunner
     steps:
       - uses: actions/checkout@v3
 
@@ -84,7 +84,7 @@ jobs:
           ls -la
 
   malicious-build:
-    runs-on: ebpf-runners-cicd
+    runs-on: epbfrunner
     steps:
       - uses: actions/checkout@v3
 
