@@ -1,6 +1,7 @@
 name: Kntrl Test Workflow
 
 on:
+  push:
   workflow_dispatch:  # Allows manual triggering of the workflow
 
 jobs:
