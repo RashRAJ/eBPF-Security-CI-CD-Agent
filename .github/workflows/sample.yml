@@ -25,6 +25,10 @@ jobs:
         run: | 
            echo Hello, world!!
            env
+      - name: Install dependencies (ARM)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget curl
 
       # Runs a single command using the runners shell
       # wget download.kondukto.io/kntrl/kntrl -q
