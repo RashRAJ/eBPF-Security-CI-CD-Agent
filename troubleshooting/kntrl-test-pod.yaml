@@ -1,21 +1,24 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: kntrl-test
+  name: kntrl-test-pod
+  labels:
+    app: kntrl-test
 spec:
   hostNetwork: true
   hostPID: true
   
   initContainers:
-    # Init container to set up eBPF environment
-    - name: init-ebpf
+    - name: init-ebpf-env
       image: alpine:latest
       command: ["/bin/sh", "-c"]
       args:
         - |
           echo "Initializing eBPF environment..."
-          # Create BPF filesystem directory if it doesn't exist
+          
+          # Create required mount points
           mkdir -p /sys/fs/bpf
+          mkdir -p /sys/kernel/debug
           
           # Mount BPF filesystem if not already mounted
           if ! mount | grep -q "bpf on /sys/fs/bpf"; then
@@ -31,6 +34,14 @@ spec:
           sysctl -w kernel.unprivileged_bpf_disabled=1 || echo "Could not set kernel.unprivileged_bpf_disabled"
           sysctl -w net.core.bpf_jit_enable=1 || echo "Could not set net.core.bpf_jit_enable"
           
+          # Verify mounts
+          echo "Mounted filesystems:"
+          mount | grep -E "debugfs|bpf"
+          
+          # Check kernel details
+          echo "Kernel information:"
+          uname -a
+          
           echo "eBPF environment initialization complete"
       securityContext:
         privileged: true
@@ -39,10 +50,11 @@ spec:
           mountPath: /sys/kernel/debug
         - name: sys-fs-bpf
           mountPath: /sys/fs/bpf
+        - name: tmp-vol
+          mountPath: /tmp
   
   containers:
-    # kntrl test container
-    - name: kntrl-test
+    - name: kntrl-agent
       image: alpine:latest
       command: ["/bin/sh", "-c"]
       args:
@@ -50,16 +62,28 @@ spec:
           echo "Setting up kntrl security agent..."
           
           # Install dependencies
-          apk add --no-cache wget curl ca-certificates libcap
+          apk add --no-cache curl wget ca-certificates libcap tcpdump
           
-          # Download kntrl binary for arm64
-          echo "Downloading kntrl v0.1.3 binary..."
-          wget -q -O /kntrl https://github.com/kondukto-io/kntrl/releases/download/v0.1.3/kntrl_arm64.arm64
+          # Create log directory
+          mkdir -p /tmp/kntrl-logs
+          chmod 777 /tmp/kntrl-logs
+          
+          # Download appropriate kntrl binary based on architecture
+          ARCH=$(uname -m)
+          if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+            KNTRL_BINARY="kntrl_arm64.arm64"
+          else
+            KNTRL_BINARY="kntrl_amd64.amd64"
+          fi
+          
+          echo "Downloading kntrl binary: $KNTRL_BINARY for architecture: $ARCH"
+          wget -q -O /kntrl https://github.com/kondukto-io/kntrl/releases/download/v0.1.3/$KNTRL_BINARY
           chmod +x /kntrl
           
           # Verify download
           if [ -f /kntrl ] && [ -x /kntrl ]; then
             echo "kntrl binary downloaded and executable"
+            echo "Version: $(/kntrl --version)"
           else
             echo "Failed to download or make kntrl executable"
             exit 1
@@ -68,84 +92,104 @@ spec:
           # Set unlimited memlock limit (crucial for eBPF)
           ulimit -l unlimited
           
-          # Show version
-          echo "kntrl version:"
-          /kntrl --version
-          
-          echo "System info:"
+          # Display system information
+          echo "System information:"
           uname -a
           
-          echo "Checking mounted filesystems:"
+          # Display mounted filesystems
+          echo "Mounted filesystems:"
           mount | grep -E "debugfs|bpf"
           
-          echo "========= ISSUE DETECTION ========="
-          echo "The error we've been seeing indicates that kntrl is incompatible with this kernel"
-          echo "because it tries to hook into specific kernel functions that aren't available or"
-          echo "are named differently in this kernel version."
-          echo ""
-          echo "Let's try with trace mode instead of monitor mode, as it might use different hooks:"
-          
-          # Try with trace mode instead of monitor
-          echo "Starting kntrl in TRACE mode with correct flags..."
+          # Try different kntrl modes with automatic fallback
+          echo "Attempting to start kntrl in TRACE mode..."
           /kntrl run \
             --mode=trace \
-            --allowed-hosts=github.com,api.github.com,*.github.io,*.githubusercontent.com,download.kondukto.io \
+            --allowed-hosts=github.com,api.github.com,*.github.io,*.githubusercontent.com,docker.io \
             --allow-local-ranges=true \
             --allow-github-meta=true \
-            --output-file-name=/tmp/kntrl.out \
-            --verbose > /tmp/kntrl.log 2>&1 &
+            --output-file-name=/tmp/kntrl-logs/trace.out \
+            --verbose > /tmp/kntrl-logs/trace.log 2>&1 &
           
-          KNTRL_PID=$!
-          echo "kntrl started with PID: $KNTRL_PID"
+          TRACE_PID=$!
+          echo "kntrl TRACE mode started with PID: $TRACE_PID"
           
-          # Check if kntrl started successfully
-          sleep 2
-          if kill -0 $KNTRL_PID 2>/dev/null; then
-            echo "kntrl is running with PID: $KNTRL_PID (SUCCESS!)"
+          # Wait to see if trace mode works
+          sleep 5
+          
+          if kill -0 $TRACE_PID 2>/dev/null; then
+            echo "✅ kntrl running successfully in TRACE mode"
+            KNTRL_MODE="TRACE"
+          else
+            echo "⚠️ kntrl failed in TRACE mode. Logs:"
+            cat /tmp/kntrl-logs/trace.log
             
-            # Test with a simple network request
-            echo "Testing network detection with a request to github.com..."
-            curl -s -o /dev/null https://github.com
+            echo "Attempting to start kntrl in MONITOR mode..."
+            /kntrl run \
+              --mode=monitor \
+              --allowed-hosts=github.com,api.github.com,docker.io \
+              --allow-local-ranges=true \
+              --verbose > /tmp/kntrl-logs/monitor.log 2>&1 &
             
-            # Let kntrl process the request
+            MONITOR_PID=$!
+            echo "kntrl MONITOR mode started with PID: $MONITOR_PID"
+            
+            # Wait to see if monitor mode works
+            sleep 5
+            
+            if kill -0 $MONITOR_PID 2>/dev/null; then
+              echo "✅ kntrl running successfully in MONITOR mode"
+              KNTRL_MODE="MONITOR"
+            else
+              echo "⚠️ kntrl failed in MONITOR mode. Logs:"
+              cat /tmp/kntrl-logs/monitor.log
+              
+              echo "❌ kntrl failed in both TRACE and MONITOR modes"
+              echo "Falling back to tcpdump for basic network monitoring..."
+              tcpdump -i any -n host github.com > /tmp/kntrl-logs/tcpdump.log 2>&1 &
+              KNTRL_MODE="TCPDUMP_FALLBACK"
+              echo "✅ Fallback monitoring enabled with tcpdump"
+            fi
+          fi
+          
+          # Test network connectivity
+          echo "Testing network connectivity..."
+          curl -s https://github.com > /dev/null
+          echo "GitHub connection test completed"
+          curl -s https://api.github.com/zen
+          echo "GitHub API connection test completed"
+          
+          # Verify kntrl operation
+          if [ "$KNTRL_MODE" = "TRACE" ] || [ "$KNTRL_MODE" = "MONITOR" ]; then
+            echo "Verifying kntrl operation:"
+            ps aux | grep kntrl | grep -v grep
+            
             sleep 2
             
-            # Check output file
-            if [ -f /tmp/kntrl.out ]; then
-              echo "KNTRL OUTPUT FILE FOUND! Contents:"
-              cat /tmp/kntrl.out
-            else
-              echo "Output file not found at /tmp/kntrl.out"
+            if [ -f /tmp/kntrl-logs/trace.out ]; then
+              echo "Trace output file contents:"
+              cat /tmp/kntrl-logs/trace.out
             fi
             
-            # Keep monitoring
-            echo "kntrl is running successfully. Watching logs..."
-            tail -f /tmp/kntrl.log
-          else
-            echo "kntrl failed to start in trace mode. Error log:"
-            cat /tmp/kntrl.log
+            # Show kntrl logs
+            echo "Last 20 lines of kntrl logs:"
+            tail -n 20 /tmp/kntrl-logs/trace.log /tmp/kntrl-logs/monitor.log 2>/dev/null
+          elif [ "$KNTRL_MODE" = "TCPDUMP_FALLBACK" ]; then
+            echo "tcpdump fallback method is running"
+            ps aux | grep tcpdump | grep -v grep
             
-            echo ""
-            echo "========= FINAL DIAGNOSIS ========="
-            echo "kntrl is incompatible with this kernel's version of the eBPF subsystem."
-            echo "This is commonly due to different kernel function names or structures between"
-            echo "different architectures (ARM64 vs x86_64) or kernel versions."
-            echo ""
-            echo "Consider using the alternative network monitoring approach that doesn't rely"
-            echo "on eBPF but provides similar security monitoring functionality."
-            echo ""
-            echo "See logs for details on the specific kernel incompatibility."
+            sleep 2
             
-            # Keep container running for log examination
-            sleep infinity
+            echo "Last 20 lines of tcpdump output:"
+            tail -n 20 /tmp/kntrl-logs/tcpdump.log
           fi
-      resources:
-        requests:
-          memory: "128Mi"
-          cpu: "50m"
-        limits:
-          memory: "256Mi"
-          cpu: "100m"
+          
+          # Keep the pod running
+          echo "Setup complete. Pod will remain running for monitoring."
+          echo "To check logs, use: kubectl logs kntrl-test-pod -c kntrl-agent"
+          echo "To exec into the pod, use: kubectl exec -it kntrl-test-pod -c kntrl-agent -- sh"
+          
+          # Keep container running
+          tail -f /dev/null
       securityContext:
         privileged: true
         capabilities:
@@ -155,6 +199,13 @@ spec:
             - SYS_PTRACE
             - NET_RAW
             - IPC_LOCK
+      resources:
+        requests:
+          memory: "128Mi"
+          cpu: "100m"
+        limits:
+          memory: "256Mi"
+          cpu: "200m"
       volumeMounts:
         - name: sys-kernel-debug
           mountPath: /sys/kernel/debug
@@ -166,16 +217,219 @@ spec:
         - name: tmp-vol
           mountPath: /tmp
   
-  # Define required volumes
   volumes:
     - name: tmp-vol
       emptyDir: {}
     - name: sys-kernel-debug
       hostPath:
         path: /sys/kernel/debug
+        type: DirectoryOrCreate
     - name: sys-fs-bpf
       hostPath:
         path: /sys/fs/bpf
+        type: DirectoryOrCreate
     - name: lib-modules
       hostPath:
         path: /lib/modules
+        type: Directory
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# apiVersion: v1
+# kind: Pod
+# metadata:
+#   name: kntrl-test
+# spec:
+#   hostNetwork: true
+#   hostPID: true
+  
+#   initContainers:
+#     # Init container to set up eBPF environment
+#     - name: init-ebpf
+#       image: alpine:latest
+#       command: ["/bin/sh", "-c"]
+#       args:
+#         - |
+#           echo "Initializing eBPF environment..."
+#           # Create BPF filesystem directory if it doesn't exist
+#           mkdir -p /sys/fs/bpf
+          
+#           # Mount BPF filesystem if not already mounted
+#           if ! mount | grep -q "bpf on /sys/fs/bpf"; then
+#             mount -t bpf bpf /sys/fs/bpf || echo "Failed to mount BPF filesystem (may already be mounted)"
+#           fi
+          
+#           # Ensure debug filesystem is mounted
+#           if ! mount | grep -q "debugfs on /sys/kernel/debug"; then
+#             mount -t debugfs debugfs /sys/kernel/debug || echo "Failed to mount debug filesystem (may already be mounted)"
+#           fi
+          
+#           # Set kernel parameters for eBPF
+#           sysctl -w kernel.unprivileged_bpf_disabled=1 || echo "Could not set kernel.unprivileged_bpf_disabled"
+#           sysctl -w net.core.bpf_jit_enable=1 || echo "Could not set net.core.bpf_jit_enable"
+          
+#           echo "eBPF environment initialization complete"
+#       securityContext:
+#         privileged: true
+#       volumeMounts:
+#         - name: sys-kernel-debug
+#           mountPath: /sys/kernel/debug
+#         - name: sys-fs-bpf
+#           mountPath: /sys/fs/bpf
+  
+#   containers:
+#     # kntrl test container
+#     - name: kntrl-test
+#       image: alpine:latest
+#       command: ["/bin/sh", "-c"]
+#       args:
+#         - |
+#           echo "Setting up kntrl security agent..."
+          
+#           # Install dependencies
+#           apk add --no-cache wget curl ca-certificates libcap
+          
+#           # Download kntrl binary for arm64
+#           echo "Downloading kntrl v0.1.3 binary..."
+#           wget -q -O /kntrl https://github.com/kondukto-io/kntrl/releases/download/v0.1.3/kntrl_arm64.arm64
+#           chmod +x /kntrl
+          
+#           # Verify download
+#           if [ -f /kntrl ] && [ -x /kntrl ]; then
+#             echo "kntrl binary downloaded and executable"
+#           else
+#             echo "Failed to download or make kntrl executable"
+#             exit 1
+#           fi
+          
+#           # Set unlimited memlock limit (crucial for eBPF)
+#           ulimit -l unlimited
+          
+#           # Show version
+#           echo "kntrl version:"
+#           /kntrl --version
+          
+#           echo "System info:"
+#           uname -a
+          
+#           echo "Checking mounted filesystems:"
+#           mount | grep -E "debugfs|bpf"
+          
+#           echo "========= ISSUE DETECTION ========="
+#           echo "The error we've been seeing indicates that kntrl is incompatible with this kernel"
+#           echo "because it tries to hook into specific kernel functions that aren't available or"
+#           echo "are named differently in this kernel version."
+#           echo ""
+#           echo "Let's try with trace mode instead of monitor mode, as it might use different hooks:"
+          
+#           # Try with trace mode instead of monitor
+#           echo "Starting kntrl in TRACE mode with correct flags..."
+#           /kntrl run \
+#             --mode=trace \
+#             --allowed-hosts=github.com,api.github.com,*.github.io,*.githubusercontent.com,download.kondukto.io \
+#             --allow-local-ranges=true \
+#             --allow-github-meta=true \
+#             --output-file-name=/tmp/kntrl.out \
+#             --verbose > /tmp/kntrl.log 2>&1 &
+          
+#           KNTRL_PID=$!
+#           echo "kntrl started with PID: $KNTRL_PID"
+          
+#           # Check if kntrl started successfully
+#           sleep 2
+#           if kill -0 $KNTRL_PID 2>/dev/null; then
+#             echo "kntrl is running with PID: $KNTRL_PID (SUCCESS!)"
+            
+#             # Test with a simple network request
+#             echo "Testing network detection with a request to github.com..."
+#             curl -s -o /dev/null https://github.com
+            
+#             # Let kntrl process the request
+#             sleep 2
+            
+#             # Check output file
+#             if [ -f /tmp/kntrl.out ]; then
+#               echo "KNTRL OUTPUT FILE FOUND! Contents:"
+#               cat /tmp/kntrl.out
+#             else
+#               echo "Output file not found at /tmp/kntrl.out"
+#             fi
+            
+#             # Keep monitoring
+#             echo "kntrl is running successfully. Watching logs..."
+#             tail -f /tmp/kntrl.log
+#           else
+#             echo "kntrl failed to start in trace mode. Error log:"
+#             cat /tmp/kntrl.log
+            
+#             echo ""
+#             echo "========= FINAL DIAGNOSIS ========="
+#             echo "kntrl is incompatible with this kernel's version of the eBPF subsystem."
+#             echo "This is commonly due to different kernel function names or structures between"
+#             echo "different architectures (ARM64 vs x86_64) or kernel versions."
+#             echo ""
+#             echo "Consider using the alternative network monitoring approach that doesn't rely"
+#             echo "on eBPF but provides similar security monitoring functionality."
+#             echo ""
+#             echo "See logs for details on the specific kernel incompatibility."
+            
+#             # Keep container running for log examination
+#             sleep infinity
+#           fi
+#       resources:
+#         requests:
+#           memory: "128Mi"
+#           cpu: "50m"
+#         limits:
+#           memory: "256Mi"
+#           cpu: "100m"
+#       securityContext:
+#         privileged: true
+#         capabilities:
+#           add:
+#             - SYS_ADMIN
+#             - NET_ADMIN
+#             - SYS_PTRACE
+#             - NET_RAW
+#             - IPC_LOCK
+#       volumeMounts:
+#         - name: sys-kernel-debug
+#           mountPath: /sys/kernel/debug
+#         - name: sys-fs-bpf
+#           mountPath: /sys/fs/bpf
+#         - name: lib-modules
+#           mountPath: /lib/modules
+#           readOnly: true
+#         - name: tmp-vol
+#           mountPath: /tmp
+  
+#   # Define required volumes
+#   volumes:
+#     - name: tmp-vol
+#       emptyDir: {}
+#     - name: sys-kernel-debug
+#       hostPath:
+#         path: /sys/kernel/debug
+#     - name: sys-fs-bpf
+#       hostPath:
+#         path: /sys/fs/bpf
+#     - name: lib-modules
+#       hostPath:
+#         path: /lib/modules
