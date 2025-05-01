@@ -34,7 +34,7 @@ jobs:
           sudo ./kntrl start --mode=trace \
             --allowed-hosts=download.kondukto.io,github.com \
             --allow-github-meta=true \
-            --output-file=/tmp/kntrl_report.out \
+            --output-file-name=/tmp/kntrl_report.out \
             --verbose &
             
           echo "Waiting for kntrl to initialize..."
