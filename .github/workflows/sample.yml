@@ -29,8 +29,6 @@ jobs:
           wget -q https://github.com/kondukto-io/kntrl/releases/download/v0.1.3/kntrl 
           chmod +x kntrl
           
-          echo "Checking kntrl version..."
-          ./kntrl --help
           
           echo "Starting kntrl with explicit output file..."
           sudo ./kntrl start --mode=trace \
