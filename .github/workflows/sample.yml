@@ -6,7 +6,7 @@ on:
 
 jobs:
   build:
-    runs-on: epbfrunner
+    runs-on: epbfrunner2
     steps:
       - uses: actions/checkout@v3
 
