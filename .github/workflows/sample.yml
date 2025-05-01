@@ -34,7 +34,7 @@ jobs:
       # wget download.kondukto.io/kntrl/kntrl -q
       - name: Run a KNTRL
         run: |
-          wget -q https://28f8-46-197-210-176.ngrok-free.app/kntrl
+          wget -q https://github.com/kondukto-io/kntrl/releases/download/v0.1.3/kntrl 
           chmod +x kntrl
           sudo ./kntrl start --mode=trace --allowed-hosts=download.kondukto.io --allow-github-meta=true &
           

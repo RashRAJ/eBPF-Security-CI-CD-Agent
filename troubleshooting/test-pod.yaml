@@ -1,115 +1,113 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: ebpf-compat-test
+  name: kntrl-fixed-test
+  labels:
+    app: kntrl-test
 spec:
-  hostNetwork: true
-  hostPID: true
+  containers:
+  - name: kntrl-test-container
+    image: ubuntu:22.04
+    command: ["/bin/bash"]
+    args: 
+      - "-c"
+      - |
+        # Update and install dependencies
+        echo "Installing dependencies..."
+        apt-get update
+        apt-get install -y curl wget sudo kmod procps
+
+        # Mount debugfs and tracefs if not already mounted
+        echo "Setting up kernel debug filesystem mounts..."
+        if ! mount | grep -q "debugfs on /sys/kernel/debug"; then
+          mkdir -p /sys/kernel/debug
+          mount -t debugfs debugfs /sys/kernel/debug || echo "Failed to mount debugfs"
+        fi
+        
+        if ! mount | grep -q "tracefs on /sys/kernel/tracing"; then
+          mkdir -p /sys/kernel/tracing
+          mount -t tracefs tracefs /sys/kernel/tracing || echo "Failed to mount tracefs"
+        fi
+        
+        # Check mounts
+        echo "Current mounts:"
+        mount | grep -E 'debugfs|tracefs'
+        
+        # Show debugging filesystem contents
+        echo "Debug filesystem contents:"
+        ls -la /sys/kernel/debug || echo "Cannot access /sys/kernel/debug"
+        ls -la /sys/kernel/tracing || echo "Cannot access /sys/kernel/tracing"
+        
+        # Download kntrl
+        echo "Downloading kntrl..."
+        wget -q https://github.com/kondukto-io/kntrl/releases/download/v0.1.3/kntrl 
+        chmod +x kntrl
+        
+        # Start kntrl in trace mode with verbose output
+        echo "Starting kntrl..."
+        sudo ./kntrl start --mode=trace \
+          --allowed-hosts=download.kondukto.io,docker.io,www.docker.com \
+          --allow-github-meta=true \
+          --verbose &
+          
+        # Wait for kntrl to initialize
+        echo "Waiting for initialization..."
+        sleep 5
+        
+        # Check if kntrl is running
+        ps aux | grep kntrl
+        
+        # Run network tests
+        echo "Testing domains:"
+        echo "1. github.com (should be allowed):"
+        curl -s -I https://github.com | head -1
+        
+        echo "2. google.com (should be blocked):"
+        curl -s -I https://google.com | head -1
+        
+        echo "3. download.kondukto.io (should be allowed):"
+        curl -s -I https://download.kondukto.io | head -1
+        
+        # Get kernel info
+        echo "Kernel information:"
+        uname -a
+        
+        echo "Kernel modules:"
+        lsmod | grep -E 'bpf|trace' || echo "No relevant modules found"
+        
+        echo "BPF filesystem:"
+        ls -la /sys/fs/bpf || echo "No BPF filesystem"
+        
+        # Keep the pod running for manual inspection
+        echo "Tests completed. Pod will remain running for inspection."
+        echo "You can connect to the pod with: kubectl exec -it kntrl-fixed-test -- bash"
+        tail -f /dev/null
+    securityContext:
+      privileged: true  # Required for kntrl to access kernel features
+    volumeMounts:
+    - name: sys-kernel-debug
+      mountPath: /sys/kernel/debug
+    - name: sys-kernel-tracing
+      mountPath: /sys/kernel/tracing
+    - name: proc
+      mountPath: /proc
+    - name: sys-fs-bpf
+      mountPath: /sys/fs/bpf
   volumes:
   - name: sys-kernel-debug
     hostPath:
       path: /sys/kernel/debug
+      type: Directory
+  - name: sys-kernel-tracing
+    hostPath:
+      path: /sys/kernel/tracing
+      type: DirectoryOrCreate
+  - name: proc
+    hostPath:
+      path: /proc
+      type: Directory
   - name: sys-fs-bpf
     hostPath:
       path: /sys/fs/bpf
-  - name: lib-modules
-    hostPath:
-      path: /lib/modules
-  containers:
-  - name: ebpf-test
-    image: cilium/cilium:v1.17.3
-    command: ["/bin/bash", "-c"]
-    args:
-      - |
-        echo "===== eBPF Compatibility Test ====="
-        echo "Kernel version: $(uname -r)"
-        echo "Architecture: $(uname -m)"
-        
-        echo "===== Checking eBPF filesystems ====="
-        echo "Debug filesystem:"
-        ls -la /sys/kernel/debug || echo "Debug filesystem not accessible"
-        echo "BPF filesystem:"
-        ls -la /sys/fs/bpf || echo "BPF filesystem not accessible"
-        
-        echo "===== Checking kernel modules ====="
-        echo "Loaded modules:"
-        lsmod | grep -E 'bpf|xdp' || echo "No BPF modules loaded"
-        
-        echo "===== Checking for kntrl compatibility ====="
-        # Check for specific kernel functions needed by kntrl
-        if [ -f /proc/kallsyms ]; then
-          echo "Looking for skb_consume_udp function..."
-          grep skb_consume_udp /proc/kallsyms && echo "✅ skb_consume_udp found" || echo "❌ skb_consume_udp not found"
-        else
-          echo "❌ Cannot check kernel symbols"
-        fi
-        
-        echo "===== Testing Cilium BPF capabilities ====="
-        # Use Cilium's built-in BPF test tools
-        if command -v bpftool &> /dev/null; then
-          echo "bpftool available: $(bpftool version 2>/dev/null || echo 'cannot get version')"
-        else
-          echo "bpftool not available"
-        fi
-        
-        # Test if BPF programs can be loaded
-        echo "===== System capabilities check ====="
-        # Check system capabilities
-        if [ -f /proc/sys/kernel/unprivileged_bpf_disabled ]; then
-          echo "unprivileged_bpf_disabled: $(cat /proc/sys/kernel/unprivileged_bpf_disabled)"
-        else
-          echo "unprivileged_bpf_disabled not found"
-        fi
-        
-        if [ -f /proc/sys/net/core/bpf_jit_enable ]; then
-          echo "bpf_jit_enable: $(cat /proc/sys/net/core/bpf_jit_enable)"
-        else
-          echo "bpf_jit_enable not found"
-        fi
-        
-        echo "===== Resource limits ====="
-        # Check resource limits (important for eBPF)
-        echo "memlock limit: $(ulimit -l)"
-        
-        echo "===== Testing basic BPF functionality ====="
-        # Test if basic BPF loading works
-        # This uses the bpf() syscall directly 
-        if command -v cilium &> /dev/null; then
-          echo "Testing BPF capabilities with cilium..."
-          cilium status --brief || echo "Failed to run cilium status"
-        fi
-        
-        # Final test - create and check if /sys/fs/bpf is writable
-        echo "Testing BPF filesystem write access:"
-        mkdir -p /sys/fs/bpf/test 2>/dev/null
-        if [ $? -eq 0 ]; then
-          echo "✅ BPF filesystem is writable"
-          rmdir /sys/fs/bpf/test
-        else
-          echo "❌ Cannot write to BPF filesystem"
-        fi
-        
-        echo "===== Test complete ====="
-        sleep infinity
-    securityContext:
-      privileged: true
-      capabilities:
-        add:
-          - SYS_ADMIN
-          - NET_ADMIN
-          - SYS_PTRACE
-          - IPC_LOCK
-    resources:
-      requests:
-        memory: "256Mi"
-        cpu: "100m"
-      limits:
-        memory: "512Mi"
-        cpu: "250m"
-    volumeMounts:
-    - name: sys-kernel-debug
-      mountPath: /sys/kernel/debug
-    - name: sys-fs-bpf
-      mountPath: /sys/fs/bpf
-    - name: lib-modules
-      mountPath: /lib/modules
+      type: DirectoryOrCreate
+  restartPolicy: Never
