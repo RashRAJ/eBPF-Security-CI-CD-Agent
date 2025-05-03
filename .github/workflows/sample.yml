@@ -17,38 +17,47 @@ jobs:
           echo "Current directory: $(pwd)"
           echo "Temp directory: /tmp"
           ls -la /tmp
+          
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y wget curl
-      - name: Setup and Start kntrl
-        run: |
-          echo "Downloading kntrl..."
-          wget -q https://github.com/kondukto-io/kntrl/releases/download/v0.1.3/kntrl 
-          chmod +x kntrl
-          
-          
-          echo "Starting kntrl with explicit output file..."
-          sudo ./kntrl start --mode=trace \
-            --allowed-hosts=download.kondukto.io,github.com \
-            --allow-github-meta=true \
-            --output-file-name=/tmp/kntrl_report.out \
-            --verbose &
+          - name: Setup and Start kntrl
+          run: |
+            echo "Downloading kntrl..."
+            wget -q https://github.com/kondukto-io/kntrl/releases/download/v0.1.3/kntrl 
+            chmod +x kntrl
             
-          echo "Waiting for kntrl to initialize..."
-          sleep 5
-          
-          # Verify kntrl is running
-          echo "Checking if kntrl is running..."
-          ps aux | grep kntrl
-          
-          # Check if output directory is writable
-          echo "Checking if /tmp is writable..."
-          touch /tmp/test_write && echo "Yes, /tmp is writable" || echo "No, /tmp is not writable"
-          
-          # List kntrl processes
-          echo "kntrl processes:"
-          ps aux | grep -i kntrl
+            # Increase MEMLOCK limits before starting kntrl
+            echo "Setting MEMLOCK limits..."
+            sudo sysctl -w kernel.unprivileged_bpf_disabled=0
+            sudo ulimit -l unlimited || echo "Unable to set unlimited memlock, continuing anyway"
+            
+            echo "Starting kntrl with explicit output file..."
+            sudo ./kntrl start --mode=trace \
+              --allowed-hosts=download.kondukto.io,github.com \
+              --allow-github-meta=true \
+              --output-file-name=/tmp/kntrl_report.out \
+              --verbose &
+              
+            echo "Waiting for kntrl to initialize..."
+            sleep 10  # Increased sleep time to give kntrl more time to initialize
+            
+            # Verify kntrl is running
+            echo "Checking if kntrl is running..."
+            ps aux | grep kntrl
+            
+            # Check if output directory is writable
+            echo "Checking if /tmp is writable..."
+            touch /tmp/test_write && echo "Yes, /tmp is writable" || echo "No, /tmp is not writable"
+            
+            # Verify kernel settings
+            echo "Checking kernel settings..."
+            sudo sysctl kernel.unprivileged_bpf_disabled || echo "Cannot check kernel.unprivileged_bpf_disabled"
+            
+            # Check memlock limits
+            echo "Current memlock limits:"
+            ulimit -l
       - name: Test allowed request
         run: |
           echo "Testing allowed request to download.kondukto.io..."

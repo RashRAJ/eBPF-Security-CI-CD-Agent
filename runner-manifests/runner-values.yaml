@@ -1,14 +1,19 @@
+## githubConfigUrl is the GitHub url for where you want to configure runners
 githubConfigUrl: "https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}"
 
+## Using PAT token for authentication
 githubConfigSecret:
   github_token: "${GITHUB_TOKEN}"
 
+## Configure container mode to use Docker-in-Docker
 containerMode:
   type: "dind"
 
+## Set runner scaling limits
 maxRunners: 5
 minRunners: 1
 
+## Runner pod template with proper security context for kntrl
 template:
   spec:
     containers:
@@ -16,8 +21,43 @@ template:
         image: ghcr.io/actions/actions-runner:latest
         command: ["/home/runner/run.sh"]
         securityContext:
-          privileged: true  
-        capabilities:
-          add: ["SYS_ADMIN", "SYS_PTRACE"]
+          privileged: true  # Needed for file system access
+          capabilities:
+            add:
+              - SYS_ADMIN  # Required for eBPF operations
+              - SYS_PTRACE # Required for ptrace
+              - IPC_LOCK   # Required for memory locking (MEMLOCK)
+              - NET_ADMIN  # Required for network operations
+        resources:
+          limits:
+            memory: "2Gi"  # Adjust as needed
+          requests:
+            memory: "1Gi"  # Adjust as needed
+        volumeMounts:
+          - name: bpf-fs
+            mountPath: /sys/fs/bpf
+          - name: cgroup-fs
+            mountPath: /sys/fs/cgroup
+          - name: modules-fs
+            mountPath: /lib/modules
+            readOnly: true
+          - name: work
+            mountPath: /home/runner/_work
+    # Add pod-level security context
     securityContext:
       fsGroup: 1000
+    volumes:
+      - name: bpf-fs
+        hostPath:
+          path: /sys/fs/bpf
+          type: Directory
+      - name: cgroup-fs
+        hostPath:
+          path: /sys/fs/cgroup
+          type: Directory
+      - name: modules-fs
+        hostPath:
+          path: /lib/modules
+          type: Directory
+      - name: work
+        emptyDir: {}
