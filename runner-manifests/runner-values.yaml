@@ -1,9 +1,23 @@
 githubConfigUrl: "https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}"
+
 githubConfigSecret:
   github_token: "${GITHUB_TOKEN}"
 
 containerMode:
-  type: dind
+  type: "dind"
 
 maxRunners: 5
 minRunners: 1
+
+template:
+  spec:
+    containers:
+      - name: runner
+        image: ghcr.io/actions/actions-runner:latest
+        command: ["/home/runner/run.sh"]
+        securityContext:
+          privileged: true  
+        capabilities:
+          add: ["SYS_ADMIN", "SYS_PTRACE"]
+    securityContext:
+      fsGroup: 1000
