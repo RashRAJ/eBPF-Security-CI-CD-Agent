@@ -1,0 +1,11 @@
+# policy-chart/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-policies
+  namespace: {{ .Release.Namespace }}
+data:
+  {{- range $path, $_ := .Files.Glob "policies/*.rego" }}
+  {{ base $path }}: |
+    {{- $.Files.Get $path | nindent 4 }}
+  {{- end }}

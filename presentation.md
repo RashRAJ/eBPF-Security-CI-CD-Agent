@@ -19,7 +19,7 @@
 - **OS**: Ubuntu 22.04 LTS
 - **Architecture**: x86_64/AMD64
 
-**NOTE**: Any deviation from this machine specifications has not tested to be fully working such as Ubuntu 22 or other linux distro or ARM64 architecture instruction set.
+**NOTE**: Any deviation from this machine specifications has not yet been tested to be fully working such as Ubuntu 22 or other linux distro or ARM64 architecture instruction set.
 
 ### Required System Access
 
@@ -163,3 +163,17 @@ With our eBPF sidecar implementation:
 - **Unexpected destinations**: Could signal compromised dependencies
 - **Repeated attempts**: Might indicate persistence mechanisms
 - **Known malicious IPs**: Immediate security concern requiring investigation
+
+## 7. [Deploying Policies](./opa-policies/policy-deployment.md)
+
+Benefits of OPA-based Policies
+
+1. Declarative Security: Define what's allowed/blocked in clear rules
+2. Dynamic Updates: Change policies without redeploying runners
+3. Complex Logic: Create sophisticated rules based on multiple factors
+4. Centralized Management: Manage all policies in one place
+5. Version Control: Track policy changes in Git
+6. Testing: Test policies before deployment
+7. Reusability: Share policies across different environments
+
+This approach makes your CI/CD security policies much more maintainable and scalable compared to hardcoding allowed/blocked hosts in the kntrl command line.
