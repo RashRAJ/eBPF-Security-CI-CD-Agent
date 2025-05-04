@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Configuration
-GITHUB_TOKEN="${GITHUB_TOKEN}"
+GITHUB_TOKEN=""
 OWNER="rashraj"
 REPO="eBPF-Security-CI-CD-Agent"
 
