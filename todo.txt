@@ -1,1 +1,0 @@
-Extend sript to delete destroyed runner using github API
