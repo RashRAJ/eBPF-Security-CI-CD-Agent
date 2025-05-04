@@ -8,8 +8,6 @@ minRunners: 1
 
 template:
   spec:
-    # nodeSelector:
-    #   cloud.google.com/gke-nodepool: ebpf-pool
     containers:
       - name: runner
         image: ghcr.io/actions/actions-runner:latest

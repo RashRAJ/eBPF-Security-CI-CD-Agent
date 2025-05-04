@@ -1,4 +1,0 @@
-kubeletConfig:
-  allowedUnsafeSysctls:
-    - "kernel.unprivileged_bpf_disabled"
-    - "vm.max_map_count"
