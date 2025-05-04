@@ -178,3 +178,17 @@ Benefits of OPA-based Policies
 7. Reusability: Share policies across different environments
 
 This approach makes your CI/CD security policies much more maintainable and scalable compared to hardcoding allowed/blocked hosts in the kntrl command line.
+
+## 8. Use Case
+
+Financial Reporting Service (GP morgan, citi)
+
+### Controls
+
+- No Data infiltration
+- Firewall blocking
+
+## 9. kntrl Modes
+
+- monitoring mode - (audit mode)
+- prevent mode (enforcement mode)
