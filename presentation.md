@@ -5,6 +5,7 @@
 ### Types of CI/CD Agents
 
 **Managed Runners**: GitHub Actions, GitLab CI (provided by platform)
+
 **Self-Hosted Runners**: Custom infrastructure you control - For Enterprise Users(Audience)
  - GitHub Self-Hosted Runners
  - GitLab Runners
