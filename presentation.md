@@ -19,6 +19,8 @@
 - **OS**: Ubuntu 22.04 LTS
 - **Architecture**: x86_64/AMD64
 
+**NOTE**: Any deviation from this machine specifications has not tested to be fully working such as Ubuntu 22 or other linux distro or ARM64 architecture instruction set.
+
 ### Required System Access
 
 - Privileged containers
