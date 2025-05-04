@@ -1,38 +1,33 @@
-## githubConfigUrl is the GitHub url for where you want to configure runners
 githubConfigUrl: "https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}"
 
-## Using PAT token for authentication
 githubConfigSecret:
   github_token: "${GITHUB_TOKEN}"
 
-## Configure container mode to use Docker-in-Docker
-containerMode:
-  type: "dind"
-
-## Set runner scaling limits
 maxRunners: 5
 minRunners: 1
 
-## Runner pod template with proper security context for kntrl
 template:
   spec:
+    # nodeSelector:
+    #   cloud.google.com/gke-nodepool: ebpf-pool
     containers:
       - name: runner
         image: ghcr.io/actions/actions-runner:latest
         command: ["/home/runner/run.sh"]
         securityContext:
-          privileged: true  # Needed for file system access
+          privileged: true
           capabilities:
             add:
-              - SYS_ADMIN  # Required for eBPF operations
-              - SYS_PTRACE # Required for ptrace
-              - IPC_LOCK   # Required for memory locking (MEMLOCK)
-              - NET_ADMIN  # Required for network operations
+              - SYS_ADMIN
+              - SYS_PTRACE
+              - IPC_LOCK
+              - NET_ADMIN
+              - SYS_RESOURCE
         resources:
           limits:
-            memory: "2Gi"  # Adjust as needed
+            memory: "4Gi"
           requests:
-            memory: "1Gi"  # Adjust as needed
+            memory: "2Gi"
         volumeMounts:
           - name: bpf-fs
             mountPath: /sys/fs/bpf
@@ -41,9 +36,10 @@ template:
           - name: modules-fs
             mountPath: /lib/modules
             readOnly: true
-          - name: work
-            mountPath: /home/runner/_work
-    # Add pod-level security context
+          - name: debugfs
+            mountPath: /sys/kernel/debug
+          - name: tracefs
+            mountPath: /sys/kernel/tracing
     securityContext:
       fsGroup: 1000
     volumes:
@@ -59,5 +55,11 @@ template:
         hostPath:
           path: /lib/modules
           type: Directory
-      - name: work
-        emptyDir: {}
+      - name: debugfs
+        hostPath:
+          path: /sys/kernel/debug
+          type: Directory
+      - name: tracefs
+        hostPath:
+          path: /sys/kernel/tracing
+          type: Directory

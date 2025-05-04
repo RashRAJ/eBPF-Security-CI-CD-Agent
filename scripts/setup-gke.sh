@@ -1,35 +1,30 @@
 #!/bin/bash
 set -e
 
-# Colors for better readability
+# Colors
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-# Configuration variables
+# Configuration
 CLUSTER_NAME="github-runners"
 GITHUB_TOKEN=""
 RUNNER_NAMESPACE="arc-runners"
 CONTROLLER_NAMESPACE="arc-systems"
-# Set these variables for your specific use case
 GITHUB_OWNER=""
 GITHUB_REPO=""
 RUNNER_NAME=""
-# GKE specific configuration
 GKE_REGION="europe-west4"
 GKE_PROJECT_ID=""
-GKE_NODE_COUNT="2"  
+GKE_NODE_COUNT="2"
 GKE_MIN_NODES="1"
-GKE_MAX_NODES="3"   
-GKE_MACHINE_TYPE="e2-standard-2" # AMD/Intel-based machine type (changed from t2a-standard-2)
-GKE_DISK_SIZE="50"  # Set explicit disk size to control SSD usage (GB)
-# Directory for runner YAML files
+GKE_MAX_NODES="3"
+GKE_MACHINE_TYPE="e2-standard-4"
+GKE_DISK_SIZE="50"
 MANIFESTS_DIR="./runner-manifests"
-# Chart version - set to 0.10.0 to avoid YAML parsing errors
 CHART_VERSION="0.10.0"
 
-# Function to display usage information
 usage() {
     echo "GitHub Self-Hosted Runner Setup Script for GKE"
     echo ""
@@ -39,7 +34,6 @@ usage() {
     echo "  create         Create GKE cluster and deploy GitHub runners"
     echo "  destroy        Destroy GKE cluster"
     echo "  deploy         Deploy GitHub runners to existing cluster"
-    echo "  clean          Remove old CRDs from the cluster"
     echo ""
     echo "Options:"
     echo "  --token=<token>       GitHub Personal Access Token (required for create/deploy)"
@@ -57,12 +51,10 @@ usage() {
     echo "Examples:"
     echo "  $0 create --token=ghp_xxxx --owner=myorg --repo=myrepo --name=myrunner --project=my-gcp-project"
     echo "  $0 create --token=ghp_xxxx --owner=myorg --name=myrunner --project=my-gcp-project --region=us-west1"
-    echo "  $0 clean --project=my-gcp-project"
     echo "  $0 destroy --project=my-gcp-project"
     exit 1
 }
 
-# Parse command line arguments
 parse_args() {
     for arg in "$@"; do
         case $arg in
@@ -100,31 +92,26 @@ parse_args() {
                 GKE_DISK_SIZE="${arg#*=}"
                 ;;
             *)
-                # Unknown option
                 ;;
         esac
     done
 }
 
-# Function to check required tools
 check_prerequisites() {
     echo -e "${YELLOW}Checking prerequisites...${NC}"
     
-    # Check for gcloud
     if ! command -v gcloud &> /dev/null; then
         echo -e "${RED}Error: gcloud CLI is not installed. Please install gcloud first.${NC}"
         echo "Visit: https://cloud.google.com/sdk/docs/install"
         exit 1
     fi
     
-    # Check for kubectl
     if ! command -v kubectl &> /dev/null; then
         echo -e "${RED}Error: kubectl is not installed. Please install kubectl first.${NC}"
         echo "Visit: https://kubernetes.io/docs/tasks/tools/install-kubectl/"
         exit 1
     fi
     
-    # Check for helm
     if ! command -v helm &> /dev/null; then
         echo -e "${RED}Error: helm is not installed. Please install helm first.${NC}"
         echo "Visit: https://helm.sh/docs/intro/install/"
@@ -134,47 +121,35 @@ check_prerequisites() {
     echo -e "${GREEN}All prerequisites are installed.${NC}"
 }
 
-# Function to check if required files exist
 check_required_files() {
-    # Check for runner values file
     if [ ! -f "${MANIFESTS_DIR}/runner-values.yaml" ]; then
         echo -e "${RED}Error: Runner values file not found at ${MANIFESTS_DIR}/runner-values.yaml${NC}"
         exit 1
     fi
     
-    # Check for controller values file
     if [ ! -f "${MANIFESTS_DIR}/controller-values.yaml" ]; then
         echo -e "${RED}Error: Controller values file not found at ${MANIFESTS_DIR}/controller-values.yaml${NC}"
         exit 1
     fi
 }
 
-# Check for required GCP project ID
 check_gcp_project() {
     if [ -z "$GKE_PROJECT_ID" ]; then
         echo -e "${RED}Error: GCP Project ID is required. Use --project=<project-id>${NC}"
         exit 1
     fi
     
-    # Set the active project
     echo -e "${YELLOW}Setting active GCP project to ${GKE_PROJECT_ID}...${NC}"
     gcloud config set project "$GKE_PROJECT_ID"
 }
 
-# Function to calculate and validate resource usage against quotas
 check_resource_usage() {
     echo -e "${YELLOW}Checking quota requirements...${NC}"
     
-    # Calculate expected CPU usage
-    local expected_cpus=$((GKE_NODE_COUNT * 2))  # e2-standard-2 has 2 CPUs per node
-    
-    # Calculate expected SSD usage (50GB per node by default, or custom size)
+    local expected_cpus=$((GKE_NODE_COUNT * 4))
     local expected_ssd=$((GKE_NODE_COUNT * GKE_DISK_SIZE))
     
     echo "Resource request - CPUs: ${expected_cpus}, SSD Storage: ${expected_ssd}GB"
-    
-    # Check if our expected usage is within quota
-    # No need to check T2A CPU quota since we're not using T2A machines anymore
     
     if [ $expected_ssd -gt 250 ]; then
         echo -e "${RED}Warning: Your configuration requires ${expected_ssd}GB of SSD storage, but your quota is only 250GB.${NC}"
@@ -186,26 +161,21 @@ check_resource_usage() {
     return 0
 }
 
-# Function to create the GKE cluster
 create_cluster() {
     echo -e "${YELLOW}Checking if cluster '${CLUSTER_NAME}' already exists in project ${GKE_PROJECT_ID}, region ${GKE_REGION}...${NC}"
     
-    # Validate resource usage against quotas
     check_resource_usage || {
         echo -e "${RED}Error: Resource requirements exceed available quota. Aborting cluster creation.${NC}"
         echo "You can request quota increases at: https://console.cloud.google.com/iam-admin/quotas?usage=USED&project=${GKE_PROJECT_ID}"
         exit 1
     }
     
-    # Check if cluster already exists
     if gcloud container clusters list --project="$GKE_PROJECT_ID" --region="$GKE_REGION" --filter="name=$CLUSTER_NAME" | grep -q "$CLUSTER_NAME"; then
         echo -e "${YELLOW}Cluster '${CLUSTER_NAME}' already exists.${NC}"
         echo -e "${YELLOW}Using existing cluster.${NC}"
     else
         echo -e "${YELLOW}Creating GKE cluster '${CLUSTER_NAME}'...${NC}"
         
-        # Create a GKE cluster with ARM nodes and latest COS with containerd
-        # Use only a single zone if needed to reduce resource requirements
         gcloud container clusters create "$CLUSTER_NAME" \
             --project="$GKE_PROJECT_ID" \
             --region="$GKE_REGION" \
@@ -216,7 +186,7 @@ create_cluster() {
             --enable-autoscaling \
             --node-locations="${GKE_REGION}-a" \
             --disk-size="$GKE_DISK_SIZE" \
-            --image-type="COS_CONTAINERD" \
+            --image-type="UBUNTU_CONTAINERD" \
             --enable-ip-alias \
             --workload-pool="${GKE_PROJECT_ID}.svc.id.goog" \
             --no-enable-master-authorized-networks
@@ -224,22 +194,18 @@ create_cluster() {
         echo -e "${GREEN}GKE cluster '${CLUSTER_NAME}' created successfully.${NC}"
     fi
     
-    # Get credentials for the cluster
     echo -e "${YELLOW}Getting credentials for cluster...${NC}"
     gcloud container clusters get-credentials "$CLUSTER_NAME" --region="$GKE_REGION" --project="$GKE_PROJECT_ID"
     
-    # Display cluster info
     echo -e "${YELLOW}Cluster information:${NC}"
     kubectl cluster-info
 }
 
-# Function to update variables in YAML file
 update_yaml_with_vars() {
     local file=$1
     local dest=$2
     echo "Updating $file with variable substitution to $dest..."
     
-    # Replace variables with their values
     cat "$file" | \
         sed "s|\${GITHUB_TOKEN}|${GITHUB_TOKEN}|g" | \
         sed "s|\${RUNNER_NAME}|${RUNNER_NAME}|g" | \
@@ -250,33 +216,6 @@ update_yaml_with_vars() {
     echo "File updated: $dest"
 }
 
-# Function to clean up old CRDs
-cleanup_old_crds() {
-    echo -e "${YELLOW}Cleaning up old CRDs...${NC}"
-    
-    # Remove old CRDs that might cause conflicts
-    kubectl delete crd autoscalingrunnersets.actions.github.com --ignore-not-found=true
-    kubectl delete crd ephemeralrunners.actions.github.com --ignore-not-found=true
-    kubectl delete crd ephemeralrunnerpods.actions.github.com --ignore-not-found=true
-    kubectl delete crd ephemeralrunnersets.actions.github.com --ignore-not-found=true
-    
-    # Check if there are any helm releases to clean up
-    if kubectl get namespace ${RUNNER_NAMESPACE} &>/dev/null; then
-        echo "Cleaning up existing runner releases in namespace ${RUNNER_NAMESPACE}..."
-        # List all helm releases in the runner namespace and delete them
-        helm list -n ${RUNNER_NAMESPACE} -q | xargs -r helm uninstall -n ${RUNNER_NAMESPACE}
-    fi
-    
-    if kubectl get namespace ${CONTROLLER_NAMESPACE} &>/dev/null; then
-        echo "Cleaning up existing controller releases in namespace ${CONTROLLER_NAMESPACE}..."
-        # List all helm releases in the controller namespace and delete them
-        helm list -n ${CONTROLLER_NAMESPACE} -q | xargs -r helm uninstall -n ${CONTROLLER_NAMESPACE}
-    fi
-    
-    echo -e "${GREEN}Cleanup completed.${NC}"
-}
-
-# Function to deploy GitHub runners
 deploy_runners() {
     if [ -z "$GITHUB_TOKEN" ]; then
         echo -e "${RED}Error: GitHub token is required. Use --token=<your-token>${NC}"
@@ -295,164 +234,33 @@ deploy_runners() {
     
     echo -e "${YELLOW}Preparing for GitHub Actions Runners deployment using chart version ${CHART_VERSION}...${NC}"
     
-    # Create temporary files with variable substitution
     TEMP_CONTROLLER_VALUES=$(mktemp)
     TEMP_RUNNER_VALUES=$(mktemp)
     
     update_yaml_with_vars "${MANIFESTS_DIR}/controller-values.yaml" "$TEMP_CONTROLLER_VALUES"
     update_yaml_with_vars "${MANIFESTS_DIR}/runner-values.yaml" "$TEMP_RUNNER_VALUES"
     
-    echo -e "${YELLOW}Deploying GitHub Actions Runner Controller...${NC}"
-    
-    # Handle ARM architecture by removing the architecture taint
-    echo -e "${YELLOW}Checking for architecture taints on nodes...${NC}"
-    if kubectl get nodes -o jsonpath='{.items[*].spec.taints[?(@.key=="kubernetes.io/arch")]}' | grep -q "arm64"; then
-        echo -e "${YELLOW}Found architecture taints. Removing kubernetes.io/arch taints from nodes...${NC}"
-        kubectl taint nodes --all kubernetes.io/arch-
-    else
-        echo -e "${GREEN}No architecture taints found.${NC}"
-    fi
-    
-    # Install cert-manager (required for actions-runner-controller)
-    echo "Installing cert-manager..."
-    
-    # Check if cert-manager is already installed
-    if kubectl get namespace cert-manager &>/dev/null; then
-        echo "cert-manager namespace already exists, checking deployments..."
-        if kubectl get deployment -n cert-manager | grep -q cert-manager; then
-            echo "cert-manager appears to be already installed, skipping installation."
-        else
-            echo "cert-manager namespace exists but deployments not found, reinstalling..."
-            kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.1/cert-manager.yaml
-            # Wait for namespace to be properly setup
-            sleep 30
-        fi
-    else
-        echo "Installing cert-manager from scratch..."
-        kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.1/cert-manager.yaml
-        # Wait for namespace to be properly setup
-        sleep 30
-    fi
-    
-    # Patch cert-manager deployments with ARM64 tolerations (in case taint removal didn't work)
-    echo "Adding ARM64 tolerations to cert-manager deployments..."
-    
-    # Function to patch a deployment with ARM64 tolerations
-    patch_deployment_for_arm64() {
-        local deployment=$1
-        echo "Patching $deployment with ARM64 tolerations..."
-        
-        # Check if deployment exists
-        if kubectl get deployment $deployment -n cert-manager &>/dev/null; then
-            # Add tolerations using kubectl patch
-            kubectl patch deployment $deployment -n cert-manager --type=json -p='[
-              {
-                "op": "add", 
-                "path": "/spec/template/spec/tolerations", 
-                "value": [{"key": "kubernetes.io/arch", "operator": "Equal", "value": "arm64", "effect": "NoSchedule"}]
-              }
-            ]' || echo "Failed to patch $deployment, but continuing..."
-        else
-            echo "Deployment $deployment not found yet, skipping patch."
-        fi
-    }
-    
-    # Patch all cert-manager deployments
-    patch_deployment_for_arm64 cert-manager
-    patch_deployment_for_arm64 cert-manager-cainjector
-    patch_deployment_for_arm64 cert-manager-webhook
-    
-    # Wait for cert-manager to be ready with improved error handling
-    echo "Waiting for cert-manager to be ready..."
-    
-    # Increase timeout and add retry logic
-    TIMEOUT=600  # 10 minutes instead of 5
-    RETRY_COUNT=0
-    MAX_RETRIES=3
-    
-    wait_for_deployment() {
-        local deployment=$1
-        echo "Waiting for ${deployment} to be ready..."
-        if ! kubectl wait --for=condition=available --timeout=${TIMEOUT}s deployment/${deployment} -n cert-manager; then
-            echo -e "${YELLOW}Warning: Timed out waiting for ${deployment}. Checking deployment status...${NC}"
-            kubectl get deployment/${deployment} -n cert-manager -o wide
-            kubectl describe deployment/${deployment} -n cert-manager
-            return 1
-        fi
-        return 0
-    }
-    
-    # Try to wait for all cert-manager components with retries
-    while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-        if wait_for_deployment "cert-manager" && \
-           wait_for_deployment "cert-manager-webhook" && \
-           wait_for_deployment "cert-manager-cainjector"; then
-            echo -e "${GREEN}All cert-manager components are ready.${NC}"
-            break
-        else
-            RETRY_COUNT=$((RETRY_COUNT+1))
-            if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
-                echo -e "${YELLOW}Retry ${RETRY_COUNT}/${MAX_RETRIES}: Waiting for cert-manager components...${NC}"
-                echo "Checking cert-manager namespace for issues:"
-                kubectl get pods -n cert-manager
-                echo "Waiting 60 seconds before retrying..."
-                sleep 60
-            else
-                echo -e "${YELLOW}Warning: Could not confirm all cert-manager components are ready after ${MAX_RETRIES} attempts.${NC}"
-                echo -e "${YELLOW}Proceeding anyway, but you may need to check cert-manager manually.${NC}"
-                # Continue despite the error - sometimes cert-manager works even when the wait times out
-            fi
-        fi
-    done
-    
-    # Create controller namespace
     echo "Creating controller namespace..."
     kubectl create namespace $CONTROLLER_NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
     
-    # Create runner namespace
     echo "Creating runner namespace..."
     kubectl create namespace ${RUNNER_NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
     
-    # Check if controller is already installed and uninstall it first
     if helm list -n $CONTROLLER_NAMESPACE | grep -q "arc"; then
         echo "Uninstalling existing controller release..."
         helm uninstall arc -n $CONTROLLER_NAMESPACE
-        # Wait a bit for resources to be cleaned up
         sleep 10
     fi
     
-    # Add ARM64 tolerations to the controller installation
-    echo "Creating custom values file with ARM64 tolerations for controller..."
-    cat > "$TEMP_CONTROLLER_VALUES.arm64" << EOF
-$(cat "$TEMP_CONTROLLER_VALUES")
-runner:
-  tolerations:
-  - key: "kubernetes.io/arch"
-    operator: "Equal"
-    value: "arm64"
-    effect: "NoSchedule"
-controller:
-  tolerations:
-  - key: "kubernetes.io/arch"
-    operator: "Equal"
-    value: "arm64"
-    effect: "NoSchedule"
-EOF
-    TEMP_CONTROLLER_VALUES="$TEMP_CONTROLLER_VALUES.arm64"
-    
-    # Install the controller using the official OCI chart with version
     echo "Installing/upgrading gha-runner-scale-set-controller version ${CHART_VERSION}..."
     helm upgrade --install arc \
       --namespace $CONTROLLER_NAMESPACE \
       -f "$TEMP_CONTROLLER_VALUES" \
       oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller --version=${CHART_VERSION}
     
-    # Wait for controller to be ready with correct deployment name
     echo "Waiting for controller to be ready..."
-    # Give some time for the deployment to be created
     sleep 20
     
-    # Try to wait for controller with improved error handling
     MAX_ATTEMPTS=3
     ATTEMPT=1
     CONTROLLER_READY=false
@@ -460,7 +268,6 @@ EOF
     while [ $ATTEMPT -le $MAX_ATTEMPTS ] && [ "$CONTROLLER_READY" = "false" ]; do
         echo "Attempt $ATTEMPT/$MAX_ATTEMPTS: Checking controller deployment..."
         
-        # Check if the deployment exists first
         if kubectl get deployment/arc-gha-rs-controller -n $CONTROLLER_NAMESPACE &>/dev/null; then
             echo "Controller deployment found, waiting for it to be available..."
             if kubectl wait --for=condition=available --timeout=300s deployment/arc-gha-rs-controller -n $CONTROLLER_NAMESPACE; then
@@ -488,36 +295,18 @@ EOF
         fi
     done
     
-    # Check if runner scale set is already installed and uninstall it first
     if helm list -n $RUNNER_NAMESPACE | grep -q "$RUNNER_NAME"; then
         echo "Uninstalling existing runner scale set release..."
         helm uninstall $RUNNER_NAME -n $RUNNER_NAMESPACE
-        # Wait a bit for resources to be cleaned up
         sleep 10
     fi
     
-    # Add ARM64 tolerations to the runner scale set
-    echo "Creating custom values file with ARM64 tolerations for runner scale set..."
-    cat > "$TEMP_RUNNER_VALUES.arm64" << EOF
-$(cat "$TEMP_RUNNER_VALUES")
-template:
-  spec:
-    tolerations:
-    - key: "kubernetes.io/arch"
-      operator: "Equal"
-      value: "arm64"
-      effect: "NoSchedule"
-EOF
-    TEMP_RUNNER_VALUES="$TEMP_RUNNER_VALUES.arm64"
-    
-    # Install the runner scale set with version
     echo "Installing/upgrading runner scale set version ${CHART_VERSION}..."
     helm upgrade --install ${RUNNER_NAME} \
       --namespace ${RUNNER_NAMESPACE} \
       -f "$TEMP_RUNNER_VALUES" \
       oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set --version=${CHART_VERSION}
     
-    # Clean up temp files
     rm "$TEMP_CONTROLLER_VALUES" "$TEMP_RUNNER_VALUES"
     
     echo -e "${GREEN}GitHub Runners deployment complete.${NC}"
@@ -526,7 +315,6 @@ EOF
     echo "kubectl logs -n ${RUNNER_NAMESPACE} ${RUNNER_NAME}-*-listener"
 }
 
-# Function to destroy the GKE cluster
 destroy_cluster() {
     echo -e "${YELLOW}Destroying GKE cluster '${CLUSTER_NAME}' in project ${GKE_PROJECT_ID}, region ${GKE_REGION}...${NC}"
     gcloud container clusters delete "$CLUSTER_NAME" --region="$GKE_REGION" --project="$GKE_PROJECT_ID" --quiet
@@ -560,11 +348,6 @@ case $COMMAND in
         check_required_files
         check_gcp_project
         deploy_runners
-        ;;
-    clean)
-        check_prerequisites
-        check_gcp_project
-        cleanup_old_crds
         ;;
     *)
         usage
