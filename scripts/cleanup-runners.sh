@@ -40,11 +40,3 @@ for i in "${!ids_array[@]}"; do
 done
 
 echo "All runners have been deleted."
-
-
-# kubectl delete runnerscaleset ebpf-runners -n arc-runners
-# kubectl delete runnerscaleset epbfrunner -n arc-runners
-# kubectl delete runnerscaleset ebpfrunnerjumbo -n arc-runners
-# kubectl delete runnerscaleset epbfrunner2 -n arc-runners
-# kubectl delete runnerscaleset ebpf-runners-cicd -n arc-runners
-# kubectl delete runnerscaleset ebpfrunnerhr -n arc-runners
