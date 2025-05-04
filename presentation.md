@@ -1,19 +1,163 @@
-# Presentation
+# Securing CI/CD Pipelines with eBPF
 
-1. CI/CD Agent: Managed or Self-Hosted(Github/Gitlab, Jenkins) etc
-2. Environments Checks (machine type and operating system)
-3. eBPF supports in the environment and necceary permisions needed for eBPF program to run on the CI/CD agent
-4. What we are using eBPF for?
-5. Running mode
-  - Sidecar
-  - On the pipeline
-  - Bake it inside runner image
+## 1. CI/CD Agents Overview
 
-## Sidecar Mode
+### Types of CI/CD Agents
 
-Running kntrl as a sidecar container is an excellent idea for scalability and consistency
+**Managed Runners**: GitHub Actions, GitLab CI (provided by platform)
+**Self-Hosted Runners**: Custom infrastructure you control - For Enterprise Users(Audience)
+ - GitHub Self-Hosted Runners
+ - GitLab Runners
+ - Jenkins Agents
 
-* Start kntrl automatically with each runner pod:
-* Reduce pipeline complexity
-* Ensure consistent security monitoring across all jobs
-* Avoid repeated kntrl setup in each pipeline
+## 2. Environment Requirements
+
+### Machine Specifications
+
+- **CPU**: 4 vCPUs (e.g., e2-standard-4 on GKE)
+- **Memory**: 16GB RAM
+- **OS**: Ubuntu 22.04 LTS
+- **Architecture**: x86_64/AMD64
+
+### Required System Access
+
+- Privileged containers
+- Kernel capabilities:
+ - `SYS_ADMIN`
+ - `SYS_PTRACE`
+ - `IPC_LOCK`
+ - `NET_ADMIN`
+ - `SYS_RESOURCE`
+
+## 3. eBPF Prerequisites
+
+### Kernel Requirements
+
+- Linux kernel with eBPF support
+- Access to critical filesystems:
+ - `/sys/fs/bpf`
+ - `/sys/fs/cgroup`
+ - `/lib/modules`
+ - `/sys/kernel/debug`
+ - `/sys/kernel/tracing`
+
+### Permissions
+
+- `kernel.unprivileged_bpf_disabled=0`
+- Sufficient memory lock limits
+- Access to BPF syscalls
+
+## 4. Why eBPF for CI/CD Security?
+
+### Key Benefits
+
+- **Automatic Security Monitoring**: All workflows protected by default
+- **Network Traffic Control**: Real-time monitoring and enforcement
+- **Zero Configuration**: No changes to existing pipelines
+- **Deep Visibility**: Kernel-level insights without performance impact
+
+### Security Features
+
+- ✅ Monitor all network connections
+- ✅ Block unauthorized destinations
+- ✅ Detect secret leakage attempts
+- ✅ Log security events
+- ✅ Allow approved connections only
+
+### Real Examples
+
+- **Allowed**: `download.kondukto.io` (build dependencies)
+- **Blocked**: `webhook.site` (potential data exfiltration)
+
+## 5. Deployment Architectures
+
+### Option 1: Sidecar Container (Recommended)
+
+**Advantages:**
+
+With our eBPF sidecar implementation:
+
+- ✅ Automatic security for all CI/CD jobs
+- ✅ Real-time network monitoring
+- ✅ Blocked malicious connections
+- ✅ Zero configuration overhead
+- ✅ Detailed security reports
+
+### Option 2: In-Pipeline Execution
+
+**Advantages:**
+
+- Simple setup
+- No infrastructure changes
+
+**Disadvantages:**
+
+- Repeated initialization
+- Slower pipeline execution
+- Configuration in every workflow
+
+### Option 3: Baked into Runner Image
+
+**Advantages:**
+
+- Fastest startup
+- Consistent across all runners
+- Single maintenance point
+
+**Disadvantages:**
+
+- Requires custom image management
+- More complex updates
+
+### Sidecar Architecture Benefits
+
+**Why Choose Sidecar?**
+
+**Automatic Protection**
+- Starts with every runner pod
+- No manual intervention needed
+
+**Simplified Pipelines**
+- Remove security setup from workflows
+- Focus on actual CI/CD tasks
+
+**Consistent Security**
+- Same protection for all jobs
+- Centralized configuration
+
+**Scalability**
+- Handles multiple concurrent jobs
+- Efficient resource utilization
+
+**Implementation Benefits**
+- Zero Changes to existing pipelines
+- Immediate Protection for all workflows
+- Centralized Logging and monitoring
+- Easy Updates without modifying pipelines
+
+## 6. Security Report Intelligence
+
+### Making Sense of the Security Report
+
+**Report Components**
+
+- **Connection Events**: Each attempt to establish network connection
+- **Allowed/Blocked Status**: Enforcement decisions based on security policy
+- **IP Addresses**: Source and destination for each connection
+- **Timestamps**: When each event occurred
+- **Process Information**: Which process initiated the connection
+
+**Key Metrics to Monitor**
+
+- Total connection attempts
+- Blocked vs allowed ratio
+- Unique destinations contacted
+- Potential data exfiltration attempts
+- Unauthorized service access
+
+**Interpreting Results**
+
+- **High block rate**: May indicate attempted attacks or misconfigured policies
+- **Unexpected destinations**: Could signal compromised dependencies
+- **Repeated attempts**: Might indicate persistence mechanisms
+- **Known malicious IPs**: Immediate security concern requiring investigation
