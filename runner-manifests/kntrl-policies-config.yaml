@@ -1,0 +1,117 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kntrl-policies
+  namespace: arc-runners
+data:
+  is_allowed_domains.rego: |
+    package kntrl.network["is_allowed_domains"]
+
+    import rego.v1
+
+    # Define allowed domains
+    allowed_domains := [
+      "github.com",
+      ".github.com",
+      "api.github.com",
+      "codeload.github.com",
+      "objects.githubusercontent.com",
+      "download.kondukto.io",
+      "registry.npmjs.org",
+      "pypi.org",
+      "files.pythonhosted.org",
+      "repo.maven.apache.org",
+      "packages.microsoft.com",
+      "dl.google.com"
+    ]
+
+    policy if {
+      domain := input.domains[_]
+      allowed_domain := allowed_domains[_]
+      
+      # Check if domain matches exactly or is a subdomain
+      domain == allowed_domain
+    }
+
+    policy if {
+      domain := input.domains[_]
+      allowed_domain := allowed_domains[_]
+      
+      # Check for wildcard subdomain matching
+      startswith(allowed_domain, ".")
+      endswith(domain, allowed_domain)
+    }
+
+  is_blocked_domains.rego: |
+    package kntrl.network["is_blocked_domains"]
+
+    import rego.v1
+
+    # Explicitly blocked domains
+    blocked_domains := [
+      "webhook.site",
+      "requestbin.com",
+      "httpbin.org",
+      "pastebin.com",
+      "transfer.sh"
+    ]
+
+    policy := "block" if {
+      domain := input.domains[_]
+      blocked_domain := blocked_domains[_]
+      contains(domain, blocked_domain)
+    }
+
+  is_allowed_ports.rego: |
+    package kntrl.network["is_allowed_ports"]
+
+    import rego.v1
+
+    # Define allowed ports
+    allowed_ports := [
+      22,    # SSH
+      53,    # DNS
+      80,    # HTTP
+      443,   # HTTPS
+      8080,  # Alt HTTP
+      9418   # Git
+    ]
+
+    policy if {
+      port := input.dport
+      port in allowed_ports
+    }
+
+  ci_security_policy.rego: |
+    package kntrl.network["ci_security_policy"]
+
+    import rego.v1
+
+    # Main policy decision
+    default policy = "block"
+
+    # Allow if all conditions are met
+    policy := "pass" if {
+      # Must be an allowed domain
+      data.kntrl.network["is_allowed_domains"].policy
+      
+      # Must not be a blocked domain
+      not data.kntrl.network["is_blocked_domains"].policy == "block"
+      
+      # Must use allowed port
+      data.kntrl.network["is_allowed_ports"].policy
+      
+      # Must be a known CI process
+      input.task_name in ["curl", "wget", "git", "npm", "yarn", "pip", "docker", "apt-get", "yum"]
+    }
+
+    # Allow local traffic
+    policy := "pass" if {
+      input.daddr == "127.0.0.1"
+    }
+
+    # Allow Kubernetes internal communication
+    policy := "pass" if {
+      startswith(input.daddr, "10.")
+      input.task_name in ["kubelet", "kube-proxy", "containerd"]
+    }

@@ -1,0 +1,63 @@
+githubConfigUrl: "https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}"
+
+githubConfigSecret:
+  github_token: "${GITHUB_TOKEN}"
+
+maxRunners: 5
+minRunners: 1
+
+template:
+  spec:
+    containers:
+      - name: runner
+        image: ghcr.io/actions/actions-runner:latest
+        command: ["/home/runner/run.sh"]
+        securityContext:
+          privileged: true
+          capabilities:
+            add:
+              - SYS_ADMIN
+              - SYS_PTRACE
+              - IPC_LOCK
+              - NET_ADMIN
+              - SYS_RESOURCE
+        resources:
+          limits:
+            memory: "4Gi"
+          requests:
+            memory: "2Gi"
+        volumeMounts:
+          - name: bpf-fs
+            mountPath: /sys/fs/bpf
+          - name: cgroup-fs
+            mountPath: /sys/fs/cgroup
+          - name: modules-fs
+            mountPath: /lib/modules
+            readOnly: true
+          - name: debugfs
+            mountPath: /sys/kernel/debug
+          - name: tracefs
+            mountPath: /sys/kernel/tracing
+    securityContext:
+      fsGroup: 1000
+    volumes:
+      - name: bpf-fs
+        hostPath:
+          path: /sys/fs/bpf
+          type: Directory
+      - name: cgroup-fs
+        hostPath:
+          path: /sys/fs/cgroup
+          type: Directory
+      - name: modules-fs
+        hostPath:
+          path: /lib/modules
+          type: Directory
+      - name: debugfs
+        hostPath:
+          path: /sys/kernel/debug
+          type: Directory
+      - name: tracefs
+        hostPath:
+          path: /sys/kernel/tracing
+          type: Directory

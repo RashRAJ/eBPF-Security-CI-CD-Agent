@@ -1,0 +1,366 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: debian-ebpf-monitor
+  labels:
+    app: network-security
+spec:
+  hostNetwork: true
+  hostPID: true
+  
+  containers:
+    - name: ebpf-monitor
+      image: debian:bookworm-slim
+      command: ["/bin/bash", "-c"]
+      args:
+        - |
+          echo "Setting up eBPF-only network security monitoring..."
+          
+          # Update and install dependencies
+          apt-get update
+          apt-get install -y \
+            python3 \
+            python3-pip \
+            python3-bpfcc \
+            bpfcc-tools \
+            linux-headers-generic \
+            curl \
+            wget \
+            ca-certificates \
+            dnsutils \
+            net-tools
+
+          # Create log directory
+          mkdir -p /tmp/security-logs
+          chmod 777 /tmp/security-logs
+
+          # Create allowed hosts list
+          cat > /tmp/security-logs/allowed-hosts.txt << EOF
+          github.com
+          api.github.com
+          githubusercontent.com
+          github.io
+          docker.io
+          127.0.0.1
+          localhost
+          EOF
+
+          # Create the eBPF monitoring script using BCC
+          cat > /tmp/network-monitor.py << 'EOF'
+          #!/usr/bin/python3
+          
+          from bcc import BPF
+          import ctypes as ct
+          import time
+          import socket
+          import os
+          import signal
+          import sys
+          import json
+          from datetime import datetime
+
+          # Configuration
+          LOG_DIR = "/tmp/security-logs"
+          ACTIVITY_LOG = f"{LOG_DIR}/activity.log"
+          ALLOWED_LOG = f"{LOG_DIR}/allowed.log"
+          BLOCKED_LOG = f"{LOG_DIR}/blocked.log"
+          STATS_LOG = f"{LOG_DIR}/stats.json"
+
+          # Load allowed hosts
+          ALLOWED_HOSTS = []
+          with open(f'{LOG_DIR}/allowed-hosts.txt', 'r') as f:
+              ALLOWED_HOSTS = [line.strip() for line in f.readlines() if line.strip()]
+
+          print(f"Loaded {len(ALLOWED_HOSTS)} allowed hosts:")
+          for host in ALLOWED_HOSTS:
+              print(f"  - {host}")
+
+          # Create or clear log files
+          for logfile in [ACTIVITY_LOG, ALLOWED_LOG, BLOCKED_LOG]:
+              with open(logfile, 'w') as f:
+                  f.write(f"--- Log started at {datetime.now().isoformat()} ---\n")
+
+          # Statistics counters
+          stats = {
+              "total_connections": 0,
+              "allowed_connections": 0,
+              "blocked_connections": 0,
+              "tcp_connections": 0,
+              "udp_connections": 0,
+              "start_time": datetime.now().isoformat(),
+              "by_process": {},
+              "by_destination": {}
+          }
+
+          # Simplified BPF program focusing on sock tracepoints
+          bpf_text = """
+          #include <uapi/linux/ptrace.h>
+          #include <net/sock.h>
+          #include <bcc/proto.h>
+
+          // Data structure for network events
+          struct net_event_t {
+              u32 pid;
+              char comm[TASK_COMM_LEN];
+              u64 ts;
+              u32 size;
+          };
+
+          BPF_PERF_OUTPUT(events);
+
+          // Track socket data transfer (send)
+          TRACEPOINT_PROBE(sock, sock_send_length) {
+              struct net_event_t event = {};
+              
+              // Get process info
+              event.pid = bpf_get_current_pid_tgid() >> 32;
+              event.ts = bpf_ktime_get_ns();
+              event.size = args->length;
+              bpf_get_current_comm(&event.comm, sizeof(event.comm));
+              
+              // Submit event
+              events.perf_submit(args, &event, sizeof(event));
+              return 0;
+          }
+
+          // Track socket data transfer (receive)
+          TRACEPOINT_PROBE(sock, sock_recv_length) {
+              struct net_event_t event = {};
+              
+              // Get process info
+              event.pid = bpf_get_current_pid_tgid() >> 32;
+              event.ts = bpf_ktime_get_ns();
+              event.size = args->length;
+              bpf_get_current_comm(&event.comm, sizeof(event.comm));
+              
+              // Submit event
+              events.perf_submit(args, &event, sizeof(event));
+              return 0;
+          }
+          """
+
+          # Load BPF program with simplified tracepoints
+          try:
+              b = BPF(text=bpf_text)
+              print("eBPF program loaded successfully")
+          except Exception as e:
+              print(f"Failed to load eBPF program: {e}")
+              sys.exit(1)
+
+          # Process network events
+          def process_event(cpu, data, size):
+              event = b["events"].event(data)
+              
+              # Format timestamp
+              time_str = time.strftime("%Y-%m-%d %H:%M:%S")
+              
+              # Get connection information from ss/netstat since we can't access it directly from the tracepoint
+              try:
+                  # Get active connections for this PID
+                  os.system(f"ss -tnp | grep {event.pid} > /tmp/security-logs/temp_conn.txt 2>/dev/null")
+                  
+                  # Parse the connection information
+                  with open("/tmp/security-logs/temp_conn.txt", "r") as f:
+                      conn_data = f.read().strip()
+                  
+                  if conn_data:
+                      # Process has network connections
+                      print(f"{time_str} PID {event.pid} ({event.comm}) Data: {event.size} bytes")
+                      print(f"  Connection: {conn_data}")
+                      
+                      # Log connection
+                      with open(ACTIVITY_LOG, 'a') as f:
+                          f.write(f"{time_str} PID {event.pid} ({event.comm}) Data: {event.size} bytes\n")
+                          f.write(f"  Connection: {conn_data}\n")
+                      
+                      # Update statistics
+                      stats["total_connections"] += 1
+                      
+                      # Check if connection is allowed
+                      allowed = False
+                      for host in ALLOWED_HOSTS:
+                          if host in conn_data:
+                              allowed = True
+                              break
+                      
+                      # Log based on decision
+                      if allowed:
+                          stats["allowed_connections"] += 1
+                          with open(ALLOWED_LOG, 'a') as f:
+                              f.write(f"ALLOWED: {time_str} PID {event.pid} ({event.comm})\n")
+                              f.write(f"  Connection: {conn_data}\n")
+                      else:
+                          stats["blocked_connections"] += 1
+                          with open(BLOCKED_LOG, 'a') as f:
+                              f.write(f"BLOCKED: {time_str} PID {event.pid} ({event.comm})\n")
+                              f.write(f"  Connection: {conn_data}\n")
+              except:
+                  # Unable to get connection info, just log the event
+                  print(f"{time_str} PID {event.pid} ({event.comm}) Data: {event.size} bytes")
+                  with open(ACTIVITY_LOG, 'a') as f:
+                      f.write(f"{time_str} PID {event.pid} ({event.comm}) Data: {event.size} bytes\n")
+              
+              # Update process stats
+              if event.comm.decode('utf-8', 'replace') not in stats["by_process"]:
+                  stats["by_process"][event.comm.decode('utf-8', 'replace')] = 0
+              stats["by_process"][event.comm.decode('utf-8', 'replace')] += 1
+              
+              # Update stats file periodically
+              if stats["total_connections"] % 10 == 0:
+                  with open(STATS_LOG, 'w') as f:
+                      json.dump(stats, f, indent=2)
+
+          # Set up event handler
+          b["events"].open_perf_buffer(process_event)
+
+          # Print header
+          print("=======================================")
+          print("  eBPF Network Security Monitoring")
+          print("=======================================")
+          print(f"Started at: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+          print(f"Logs directory: {LOG_DIR}")
+          print(f"Allowed hosts: {', '.join(ALLOWED_HOSTS)}")
+          print("=======================================")
+          print("Monitoring network connections...")
+
+          # Poll events
+          try:
+              while True:
+                  b.perf_buffer_poll()
+                  time.sleep(0.1)  # Slight delay to reduce CPU usage
+          except KeyboardInterrupt:
+              print("Exiting...")
+              # Final stats update
+              with open(STATS_LOG, 'w') as f:
+                  json.dump(stats, f, indent=2)
+              sys.exit(0)
+          EOF
+
+          # Make the script executable
+          chmod +x /tmp/network-monitor.py
+
+          # Create a wrapper script that creates a separate file based monitoring system
+          cat > /tmp/wrapper.sh << 'EOF'
+          #!/bin/bash
+
+          LOG_DIR="/tmp/security-logs"
+          MONITOR_PID=0
+
+          # Function to monitor process connections
+          function monitor_connections() {
+            while true; do
+              # Get all connections
+              ss -tnp > $LOG_DIR/connections.log
+              
+              # Check each connection against allowed hosts
+              cat $LOG_DIR/connections.log | grep -v "Local" | while read line; do
+                if [[ "$line" =~ ([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+):([0-9]+) ]]; then
+                  IP="${BASH_REMATCH[1]}"
+                  PORT="${BASH_REMATCH[2]}"
+                  
+                  # Try to resolve the hostname
+                  HOSTNAME=$(host $IP 2>/dev/null | grep "domain name pointer" | cut -d " " -f 5)
+                  
+                  # Check against allowed hosts
+                  ALLOWED=false
+                  while read -r host; do
+                    if [[ -n "$HOSTNAME" && "$HOSTNAME" == *"$host"* ]] || [[ "$IP" == *"$host"* ]]; then
+                      ALLOWED=true
+                      break
+                    fi
+                  done < $LOG_DIR/allowed-hosts.txt
+                  
+                  # Log the result
+                  TIMESTAMP=$(date "+%Y-%m-%d %H:%M:%S")
+                  if [ "$ALLOWED" = true ]; then
+                    echo "$TIMESTAMP ALLOWED: $IP:$PORT ($HOSTNAME)" >> $LOG_DIR/file_monitor.log
+                  else
+                    echo "$TIMESTAMP BLOCKED: $IP:$PORT ($HOSTNAME)" >> $LOG_DIR/file_monitor.log
+                  fi
+                fi
+              done
+              
+              # Sleep for a bit
+              sleep 5
+            done
+          }
+
+          # Start the main eBPF monitor
+          echo "Starting eBPF network monitor..."
+          python3 /tmp/network-monitor.py > $LOG_DIR/ebpf.log 2>&1 &
+          MONITOR_PID=$!
+
+          # Wait to see if it started
+          sleep 3
+          if kill -0 $MONITOR_PID 2>/dev/null; then
+            echo "✅ eBPF monitoring started successfully with PID: $MONITOR_PID"
+            
+            # Start the connection monitor in background
+            monitor_connections &
+            
+            # Test network connectivity
+            echo "Testing network connectivity..."
+            curl -s -o /dev/null https://github.com
+            echo "GitHub connection test completed"
+            curl -s -o /dev/null https://api.github.com
+            echo "GitHub API connection test completed"
+            
+            # Tail logs to keep container running
+            echo "Monitoring is active. Showing live logs..."
+            touch $LOG_DIR/activity.log
+            tail -f $LOG_DIR/activity.log
+          else
+            echo "❌ Failed to start eBPF monitoring. Logs:"
+            cat $LOG_DIR/ebpf.log
+            
+            # Fall back to file-based monitoring
+            echo "Falling back to file-based monitoring..."
+            monitor_connections &
+            
+            # Test network connectivity
+            echo "Testing network connectivity with file-based monitoring..."
+            curl -s -o /dev/null https://github.com
+            echo "GitHub connection test completed"
+            curl -s -o /dev/null https://api.github.com
+            echo "GitHub API connection test completed"
+            
+            # Tail logs to keep container running
+            echo "File-based monitoring is active. Showing live logs..."
+            touch $LOG_DIR/file_monitor.log
+            tail -f $LOG_DIR/file_monitor.log
+          fi
+          EOF
+
+          chmod +x /tmp/wrapper.sh
+
+          # Start the wrapper script
+          echo "Starting network monitoring..."
+          /tmp/wrapper.sh
+      securityContext:
+        privileged: true
+        capabilities:
+          add:
+            - SYS_ADMIN
+            - NET_ADMIN
+            - SYS_PTRACE
+            - NET_RAW
+            - IPC_LOCK
+      volumeMounts:
+        - name: sys-kernel-debug
+          mountPath: /sys/kernel/debug
+        - name: sys-fs-bpf
+          mountPath: /sys/fs/bpf
+        - name: tmp-vol
+          mountPath: /tmp
+  
+  volumes:
+    - name: tmp-vol
+      emptyDir: {}
+    - name: sys-kernel-debug
+      hostPath:
+        path: /sys/kernel/debug
+        type: DirectoryOrCreate
+    - name: sys-fs-bpf
+      hostPath:
+        path: /sys/fs/bpf
+        type: DirectoryOrCreate

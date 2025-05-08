@@ -16,3 +16,9 @@ nodes:
       - containerPort: 443
         hostPort: 443
         protocol: TCP
+    extraMounts:
+      - hostPath: /sys/kernel/debug
+        containerPath: /sys/kernel/debug
+      - hostPath: /lib/modules
+        containerPath: /lib/modules
+        readOnly: true
