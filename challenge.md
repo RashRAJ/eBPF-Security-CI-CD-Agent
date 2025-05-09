@@ -25,3 +25,10 @@ Step 4(Optionally): Vertext AI - Real-time analytics on pipeline reports (fine-t
 
 - What other Gitlab products and services can we enable/showcase?
 - What other Google products and services can we enable/showase?
+
+## Impleemntation steps
+
+- Architecture/flow of the solution
+- Runner Setup with eBPF controls
+- eBPF Controls and policies (using kntrl or custom build?)
+- Genimi integration on Gitlab Pipeline
